@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from forensics import analyze_document, load_document_preview
+from forensics import analyze_document, load_document_pages
 from sample_generator import create_contract_sample
 
 
@@ -19,70 +19,93 @@ def main() -> None:
     _render_sidebar()
     _render_header()
 
-    document_image = _select_document()
-    if document_image is None:
+    pages = _select_document()
+    if not pages:
         _render_empty_state()
         return
 
+    page_count = len(pages)
     left, right = st.columns([1.1, 0.9], gap="large")
 
     with left:
-        st.markdown("### 원본 문서 보기")
-        st.image(document_image, caption=st.session_state["document_name"], use_container_width=True)
+        st.markdown("### Original Document")
+        st.caption(f"{st.session_state['document_name']} · {page_count} page(s)")
+        selected_page = st.selectbox(
+            "Preview page",
+            options=list(range(1, page_count + 1)),
+            format_func=lambda page: f"Page {page}",
+        )
+        st.image(pages[selected_page - 1], caption=f"Page {selected_page}", use_container_width=True)
+
+        with st.expander("Preview all pages"):
+            for index, page in enumerate(pages, start=1):
+                st.image(page, caption=f"Page {index}", use_container_width=True)
 
     with right:
-        st.markdown("### 분석")
-        st.write("ELA, 노이즈 불일치, 블러 차이 분석으로 문서의 조작 의심 영역을 찾습니다.")
+        st.markdown("### Analysis")
+        st.write("PDF uploads are loaded page by page. The analysis focuses on local pattern differences, not all text edges.")
 
-        if st.button("분석 시작", type="primary", use_container_width=True):
-            _run_analysis(document_image)
+        if st.button("Analyze all pages", type="primary", use_container_width=True):
+            _run_analysis(pages)
 
-        result = st.session_state.get("analysis_result")
-        if result:
-            _render_analysis_result(result)
+        results = st.session_state.get("analysis_results")
+        if results:
+            _render_analysis_results(results)
         else:
-            st.info("분석 시작 버튼을 누르면 위조 의심 점수와 표시 이미지를 확인할 수 있습니다.")
+            st.info("Run analysis to see review-candidate regions and per-page scores.")
 
 
-def _select_document():
+def _select_document() -> list:
     sample_left, sample_right = st.columns(2)
     with sample_left:
-        if st.button("정상 계약서 샘플 생성", use_container_width=True):
-            _set_document(create_contract_sample(tampered=False), "정상 계약서 샘플")
+        if st.button("Generate normal contract sample", use_container_width=True):
+            _set_document([create_contract_sample(tampered=False)], "Normal contract sample")
     with sample_right:
-        if st.button("조작 계약서 샘플 생성", use_container_width=True):
-            image = create_contract_sample(tampered=True)
-            _set_document(image, "날짜/금액/서명 조작 계약서 샘플")
-            _run_analysis(image)
+        if st.button("Generate tampered contract sample", use_container_width=True):
+            pages = [create_contract_sample(tampered=True)]
+            _set_document(pages, "Tampered date/amount/signature sample")
+            _run_analysis(pages)
 
     uploaded_file = st.file_uploader(
-        "문서 파일 업로드",
+        "Upload document",
         type=["jpg", "jpeg", "png", "pdf"],
-        help="JPG, PNG, PDF를 지원합니다. PDF는 첫 페이지만 분석합니다.",
+        help="JPG, PNG, and PDF are supported. PDF files are analyzed across all pages.",
     )
 
     if uploaded_file is not None:
         try:
-            image = load_document_preview(uploaded_file)
+            pages = load_document_pages(uploaded_file)
         except Exception as exc:
-            st.error(f"파일을 불러오지 못했습니다: {exc}")
-            return st.session_state.get("document_image")
+            st.error(f"Could not load file: {exc}")
+            return st.session_state.get("document_pages", [])
 
-        if st.session_state.get("document_name") != uploaded_file.name:
-            _set_document(image, uploaded_file.name)
+        current_key = f"{uploaded_file.name}:{uploaded_file.size}"
+        if st.session_state.get("document_key") != current_key:
+            _set_document(pages, uploaded_file.name, current_key)
 
-    return st.session_state.get("document_image")
+    return st.session_state.get("document_pages", [])
 
 
-def _set_document(image, name: str) -> None:
-    st.session_state["document_image"] = image
+def _set_document(pages: list, name: str, key: str | None = None) -> None:
+    st.session_state["document_pages"] = pages
     st.session_state["document_name"] = name
-    st.session_state.pop("analysis_result", None)
+    st.session_state["document_key"] = key or name
+    st.session_state.pop("analysis_results", None)
 
 
-def _run_analysis(image) -> None:
-    with st.spinner("문서 위조 의심 영역을 분석하는 중입니다..."):
-        st.session_state["analysis_result"] = analyze_document(image)
+def _run_analysis(pages: list) -> None:
+    progress = st.progress(0)
+    results = []
+
+    with st.spinner("Analyzing all pages for local review candidates..."):
+        total = len(pages)
+        for index, page in enumerate(pages, start=1):
+            result = analyze_document(page)
+            result["page"] = index
+            results.append(result)
+            progress.progress(index / total)
+
+    st.session_state["analysis_results"] = results
 
 
 def _render_header() -> None:
@@ -92,9 +115,9 @@ def _render_header() -> None:
           <div>
             <p class="eyebrow">Document Forgery Detection MVP</p>
             <h1>DocuGuard AI</h1>
-            <p class="subtitle">AI로 문서 위조 흔적을 탐지합니다</p>
+            <p class="subtitle">Detect document tampering traces with image forensics</p>
           </div>
-          <div class="stage-badge">Hackathon Demo</div>
+          <div class="stage-badge">All Pages PDF</div>
         </section>
         """,
         unsafe_allow_html=True,
@@ -104,63 +127,69 @@ def _render_header() -> None:
 def _render_sidebar() -> None:
     with st.sidebar:
         st.markdown("## DocuGuard AI")
-        st.caption("계약서, 공문, 보험 문서 위조 탐지 MVP")
+        st.caption("Contract, notice, and insurance document screening MVP")
         st.divider()
-        st.markdown("### 데모 기능")
+        st.markdown("### Demo")
         st.markdown(
             """
-            - 정상 계약서 샘플 생성
-            - 날짜/금액/서명 조작 샘플 생성
-            - 샘플 즉시 분석
-            - 의심 영역 빨간 박스 표시
+            - Generate normal contract sample
+            - Generate tampered sample
+            - Preview every PDF page
+            - Analyze every PDF page
+            - Show up to 5 review-candidate boxes
             """
         )
         st.divider()
-        st.markdown("### 분석 항목")
+        st.markdown("### Checks")
         st.markdown(
             """
-            - Error Level Analysis(ELA)
-            - 노이즈 불일치 분석
-            - 선명도/블러 차이 분석
+            - Error Level Analysis
+            - Local noise mismatch
+            - Sharpness / blur mismatch
             """
         )
-        st.info("이 MVP는 1차 스크리닝 도구입니다. 법적 감정에는 원본 파일과 전문 감정 절차가 필요합니다.")
+        st.info("This MVP finds additional review candidates. It does not make a final authenticity decision.")
 
 
 def _render_empty_state() -> None:
     st.markdown(
         """
         <div class="empty-state">
-          <h3>문서를 업로드하거나 샘플을 생성하세요</h3>
-          <p>발표 데모에서는 조작 계약서 샘플 생성 버튼을 누르면 바로 분석 결과까지 확인할 수 있습니다.</p>
+          <h3>Upload a document or generate a sample</h3>
+          <p>For PDFs, all pages are loaded and can be analyzed together.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-def _render_analysis_result(result: dict) -> None:
-    score = int(result["score"])
-    level = str(result["level"])
-    level_class = "low" if score < 40 else "warn" if score < 70 else "high"
+def _render_analysis_results(results: list[dict]) -> None:
+    max_score = max(int(result["score"]) for result in results)
+    high_page = max(results, key=lambda result: int(result["score"]))
+    level_class = "low" if max_score < 40 else "warn" if max_score < 70 else "high"
 
     st.markdown(
         f"""
         <div class="result-panel">
-          <span class="panel-label">위조 의심 점수</span>
-          <strong class="{level_class}">{score}/100</strong>
-          <p>최종 판정: <b>{level}</b></p>
+          <span class="panel-label">Highest review-candidate score</span>
+          <strong class="{level_class}">{max_score}/100</strong>
+          <p>Highest page: <b>Page {high_page["page"]}</b> · Level: <b>{high_page["level"]}</b></p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.progress(score / 100)
-    st.markdown("#### 의심 영역 표시 이미지")
-    st.image(result["result_image"], caption="빨간 박스: 위조 의심 영역", use_container_width=True)
-    st.markdown("#### 분석 리포트")
-    st.write(result["summary"])
-    for reason in result["reasons"]:
-        st.markdown(f"- {reason}")
+    st.progress(max_score / 100)
+
+    page_labels = [f"Page {result['page']} · {result['score']}/100" for result in results]
+    tabs = st.tabs(page_labels)
+
+    for tab, result in zip(tabs, results):
+        with tab:
+            st.markdown(f"#### Page {result['page']} result")
+            st.image(result["result_image"], caption="Red boxes: additional review candidates", use_container_width=True)
+            st.write(result["summary"])
+            for reason in result["reasons"]:
+                st.markdown(f"- {reason}")
 
 
 def _apply_style() -> None:
