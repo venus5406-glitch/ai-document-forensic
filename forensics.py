@@ -38,7 +38,8 @@ def analyze_document(image: Image.Image) -> dict[str, Any]:
         "level": _level_from_score(score),
         "result_image": result_image,
         "boxes": boxes,
-        "summary": _summary(score, boxes),
+        "summary": _summary(boxes),
+        "reasons": _build_reasons(ela, noise, blur, boxes),
     }
 
 
@@ -122,7 +123,7 @@ def _combine_maps(maps: list[np.ndarray]) -> np.ndarray:
 
 
 def _find_suspicious_boxes(score_map: np.ndarray) -> list[tuple[int, int, int, int]]:
-    threshold_value = max(95, int(np.percentile(score_map, 96)))
+    threshold_value = max(210, int(np.percentile(score_map, 99.4)))
     _, binary = cv2.threshold(score_map, threshold_value, 255, cv2.THRESH_BINARY)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (13, 9))
@@ -174,19 +175,19 @@ def _calculate_score(
     ela_signal = _map_signal(ela)
     noise_signal = _map_signal(noise)
     blur_signal = _map_signal(blur)
-    box_signal = min(len(boxes) * 5, 25)
+    box_signal = min(len(boxes) * 4, 20)
 
     score = ela_signal * 0.38 + noise_signal * 0.28 + blur_signal * 0.24 + box_signal
     return int(np.clip(round(score), 0, 100))
 
 
 def _map_signal(score_map: np.ndarray) -> float:
-    high_pixels = score_map[score_map >= np.percentile(score_map, 94)]
+    high_pixels = score_map[score_map >= 210]
     if high_pixels.size == 0:
         return 0.0
     intensity = float(np.mean(high_pixels) / 255.0)
     coverage = float(high_pixels.size / score_map.size)
-    return min((intensity * 72) + (coverage * 420), 100)
+    return min((intensity * 34) + (coverage * 4200), 100)
 
 
 def _level_from_score(score: int) -> str:
@@ -197,7 +198,30 @@ def _level_from_score(score: int) -> str:
     return "낮음"
 
 
-def _summary(score: int, boxes: list[tuple[int, int, int, int]]) -> str:
+def _summary(boxes: list[tuple[int, int, int, int]]) -> str:
     if not boxes:
         return "큰 조작 의심 영역은 발견되지 않았습니다. 다만 이미지 품질에 따라 결과가 달라질 수 있습니다."
     return f"ELA, 노이즈, 블러 패턴을 종합해 {len(boxes)}개의 의심 영역을 표시했습니다."
+
+
+def _build_reasons(
+    ela: np.ndarray,
+    noise: np.ndarray,
+    blur: np.ndarray,
+    boxes: list[tuple[int, int, int, int]],
+) -> list[str]:
+    reasons: list[str] = []
+
+    if _map_signal(ela) >= 38:
+        reasons.append("일부 영역에서 JPEG 재압축 후 밝기 차이가 크게 나타나 압축 이력 불일치가 의심됩니다.")
+    if _map_signal(noise) >= 35:
+        reasons.append("문서 배경과 글자 주변의 노이즈 패턴이 균일하지 않아 붙여넣기 흔적 가능성이 있습니다.")
+    if _map_signal(blur) >= 35:
+        reasons.append("특정 영역의 선명도와 블러 정도가 주변 텍스트와 달라 부분 편집 가능성이 있습니다.")
+    if boxes:
+        reasons.append(f"빨간 박스로 표시된 {len(boxes)}개 영역은 세 분석 결과가 겹친 우선 검토 후보입니다.")
+
+    if not reasons:
+        reasons.append("현재 이미지에서는 ELA, 노이즈, 블러 분석 기준의 강한 이상 신호가 낮게 관찰됩니다.")
+
+    return reasons
