@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from io import BytesIO
-
-import matplotlib.pyplot as plt
 import streamlit as st
 
-from forensics import load_document, run_forensic_analysis
-from sample_generator import create_sample_document, sample_png_bytes
+from forensics import analyze_document_dummy, load_document_preview
 
 
 st.set_page_config(
@@ -18,176 +14,124 @@ st.set_page_config(
 
 
 def main() -> None:
-    _style()
-    _sidebar()
+    _apply_style()
+    _render_sidebar()
+    _render_header()
 
+    uploaded_file = st.file_uploader(
+        "문서 파일 업로드",
+        type=["jpg", "jpeg", "png", "pdf"],
+        help="JPG, PNG, PDF를 지원합니다. PDF는 첫 페이지만 미리보기로 변환합니다.",
+    )
+
+    if uploaded_file is None:
+        _render_empty_state()
+        return
+
+    try:
+        document_image = load_document_preview(uploaded_file)
+    except Exception as exc:
+        st.error(f"파일을 불러오지 못했습니다: {exc}")
+        return
+
+    st.session_state["document_name"] = uploaded_file.name
+    st.session_state["document_image"] = document_image
+
+    left, right = st.columns([1.15, 0.85], gap="large")
+
+    with left:
+        st.markdown("### 원본 문서 보기")
+        st.image(document_image, caption=uploaded_file.name, use_container_width=True)
+
+    with right:
+        st.markdown("### 분석 준비")
+        st.write("업로드된 문서가 정상적으로 로드되었습니다. 아래 버튼을 눌러 1단계 더미 분석을 실행하세요.")
+
+        analyze_clicked = st.button(
+            "분석 시작",
+            type="primary",
+            use_container_width=True,
+        )
+
+        if analyze_clicked:
+            with st.spinner("문서 화면 흐름을 검증하는 중입니다..."):
+                st.session_state["analysis_result"] = analyze_document_dummy(uploaded_file.name)
+
+        result = st.session_state.get("analysis_result")
+        if result:
+            _render_dummy_result(result)
+        else:
+            st.info("아직 분석 결과가 없습니다. 분석 시작 버튼을 눌러 더미 점수를 확인하세요.")
+
+
+def _render_header() -> None:
     st.markdown(
         """
         <section class="hero">
           <div>
-            <p class="eyebrow">AI Document Forensic MVP</p>
+            <p class="eyebrow">Document Forgery Detection MVP</p>
             <h1>DocuGuard AI</h1>
             <p class="subtitle">AI로 문서 위조 흔적을 탐지합니다</p>
           </div>
-          <div class="hero-badge">OpenCV 기반 분석</div>
+          <div class="stage-badge">1단계 MVP</div>
         </section>
         """,
         unsafe_allow_html=True,
     )
 
-    uploaded = st.file_uploader(
-        "문서 이미지 또는 PDF 업로드",
-        type=["jpg", "jpeg", "png", "pdf"],
-        help="PDF는 첫 페이지만 분석합니다.",
-    )
 
-    sample_choice = st.segmented_control(
-        "해커톤 데모 샘플",
-        options=["업로드 사용", "정상 문서 샘플", "조작 문서 샘플"],
-        default="업로드 사용",
-    )
-
-    image = None
-    source_label = ""
-
-    if sample_choice != "업로드 사용":
-        image = create_sample_document(tampered=sample_choice == "조작 문서 샘플")
-        source_label = sample_choice
-    elif uploaded is not None:
-        try:
-            image = load_document(uploaded)
-            source_label = uploaded.name
-        except Exception as exc:
-            st.error(f"문서를 불러오지 못했습니다: {exc}")
-            return
-
-    if image is None:
-        _empty_state()
-        return
-
-    with st.spinner("문서의 압축 흔적, 노이즈, 블러, 컬러 잉크 패턴을 분석하는 중입니다..."):
-        analysis = run_forensic_analysis(image)
-
-    _results(image, analysis, source_label)
-
-
-def _sidebar() -> None:
+def _render_sidebar() -> None:
     with st.sidebar:
-        st.markdown("### DocuGuard AI")
-        st.caption("계약서, 공문, 보험 문서의 부분 편집 흔적을 빠르게 스크리닝합니다.")
-        st.download_button(
-            "정상 샘플 다운로드",
-            data=sample_png_bytes(tampered=False),
-            file_name="docuguard_normal_sample.png",
-            mime="image/png",
-            use_container_width=True,
-        )
-        st.download_button(
-            "조작 샘플 다운로드",
-            data=sample_png_bytes(tampered=True),
-            file_name="docuguard_tampered_sample.png",
-            mime="image/png",
-            use_container_width=True,
-        )
+        st.markdown("## DocuGuard AI")
+        st.caption("계약서, 공문, 보험 문서 위조 탐지 MVP")
         st.divider()
-        st.markdown("#### 분석 엔진")
-        st.write("ELA, 노이즈 잔차, Laplacian 선명도, JPEG 블록 흔적, 서명/도장 색상 이상을 조합합니다.")
-        st.info("본 MVP는 포렌식 보조 도구입니다. 법적 최종 감정에는 원본 파일과 전문 감정 절차가 필요합니다.")
+        st.markdown("### 현재 구현 범위")
+        st.markdown(
+            """
+            - 파일 업로드
+            - 이미지/PDF 첫 페이지 미리보기
+            - 분석 버튼
+            - 더미 위조 점수 표시
+            """
+        )
+        st.info("이번 단계에서는 복잡한 포렌식 분석 로직을 실행하지 않습니다.")
 
 
-def _empty_state() -> None:
-    left, right = st.columns([1.1, 0.9])
-    with left:
-        st.markdown("### 문서를 업로드하거나 샘플을 선택하세요")
-        st.write("JPG, PNG, PDF 문서를 넣으면 첫 페이지를 분석하고 의심 영역을 빨간 박스로 표시합니다.")
-    with right:
-        st.image(create_sample_document(tampered=True), caption="데모용 조작 샘플 미리보기")
-
-
-def _results(image, analysis: dict, source_label: str) -> None:
-    score = analysis["score"]
-    verdict = analysis["verdict"]
-    score_class = "low" if score < 40 else "warn" if score < 70 else "high"
-
+def _render_empty_state() -> None:
     st.markdown(
-        f"""
-        <div class="score-row">
-          <div class="metric-card">
-            <span>분석 문서</span>
-            <strong>{source_label}</strong>
-          </div>
-          <div class="metric-card {score_class}">
-            <span>위조 의심 점수</span>
-            <strong>{score}/100</strong>
-          </div>
-          <div class="metric-card {score_class}">
-            <span>최종 판정</span>
-            <strong>{verdict}</strong>
-          </div>
+        """
+        <div class="empty-state">
+          <h3>문서를 업로드하세요</h3>
+          <p>JPG, PNG 또는 PDF 파일을 올리면 원본 미리보기와 분석 버튼이 표시됩니다.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    tab_original, tab_analysis, tab_report = st.tabs(["원본 문서 보기", "분석 결과 보기", "분석 리포트"])
 
-    with tab_original:
-        st.image(image, caption="원본 문서", use_container_width=True)
+def _render_dummy_result(result: dict[str, str | int]) -> None:
+    score = int(result["score"])
+    level = str(result["level"])
+    level_class = "low" if score < 40 else "warn" if score < 70 else "high"
 
-    with tab_analysis:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.image(analysis["result_image"], caption="의심 영역 표시 이미지", use_container_width=True)
-        with col2:
-            st.image(analysis["heatmap"], caption="종합 의심 히트맵", use_container_width=True)
-            st.image(analysis["ela_preview"], caption="ELA 반응 미리보기", use_container_width=True)
+    st.markdown(
+        f"""
+        <div class="result-panel">
+          <span class="panel-label">위조 의심 점수</span>
+          <strong class="{level_class}">{score}/100</strong>
+          <p>최종 판정: <b>{level}</b></p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    with tab_report:
-        st.markdown("### 분석 리포트")
-        st.progress(score / 100)
-        for finding in analysis["findings"]:
-            st.markdown(
-                f"""
-                <div class="finding">
-                  <div>
-                    <strong>{finding.label}</strong>
-                    <p>{finding.description}</p>
-                  </div>
-                  <span>{finding.severity:.1f}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        st.markdown("### 판정 기준")
-        chart = _score_chart(score)
-        st.pyplot(chart, clear_figure=True)
-
-        buffer = BytesIO()
-        analysis["result_image"].save(buffer, format="PNG")
-        st.download_button(
-            "분석 결과 이미지 다운로드",
-            data=buffer.getvalue(),
-            file_name="docuguard_analysis_result.png",
-            mime="image/png",
-            use_container_width=True,
-        )
+    st.progress(score / 100)
+    st.markdown("#### 분석 리포트")
+    st.write(result["message"])
+    st.caption("이 점수는 화면 흐름 검증을 위한 더미 값입니다. 실제 탐지 로직은 다음 단계에서 연결합니다.")
 
 
-def _score_chart(score: int):
-    fig, ax = plt.subplots(figsize=(7, 1.2))
-    ax.barh(["위조 의심"], [score], color="#dc2626" if score >= 70 else "#f59e0b" if score >= 40 else "#16a34a")
-    ax.set_xlim(0, 100)
-    ax.axvspan(0, 40, color="#dcfce7", alpha=0.7)
-    ax.axvspan(40, 70, color="#fef3c7", alpha=0.7)
-    ax.axvspan(70, 100, color="#fee2e2", alpha=0.7)
-    ax.set_xlabel("Score")
-    ax.spines[["top", "right", "left"]].set_visible(False)
-    ax.tick_params(axis="y", length=0)
-    return fig
-
-
-def _style() -> None:
+def _apply_style() -> None:
     st.markdown(
         """
         <style>
@@ -197,101 +141,82 @@ def _style() -> None:
         }
         .hero {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
             gap: 24px;
             padding: 30px 34px;
-            margin-bottom: 22px;
-            background: linear-gradient(135deg, #102033 0%, #144153 48%, #1f6f6a 100%);
-            color: white;
+            margin-bottom: 24px;
+            background: linear-gradient(135deg, #102033 0%, #144153 52%, #1f6f6a 100%);
+            color: #ffffff;
             border-radius: 8px;
             box-shadow: 0 18px 45px rgba(15, 23, 42, 0.16);
         }
         .hero h1 {
             margin: 0;
             font-size: 44px;
+            line-height: 1.05;
             letter-spacing: 0;
         }
         .eyebrow {
-            margin: 0 0 8px 0;
+            margin: 0 0 8px;
+            color: #bae6fd;
             font-size: 13px;
             text-transform: uppercase;
-            color: #bae6fd;
         }
         .subtitle {
-            margin: 8px 0 0 0;
+            margin: 10px 0 0;
             color: #e0f2fe;
             font-size: 19px;
         }
-        .hero-badge {
-            border: 1px solid rgba(255,255,255,0.35);
+        .stage-badge {
             padding: 10px 14px;
+            border: 1px solid rgba(255,255,255,0.35);
             border-radius: 6px;
             color: #ecfeff;
             white-space: nowrap;
         }
-        .score-row {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 14px;
-            margin: 12px 0 22px 0;
-        }
-        .metric-card {
-            background: white;
-            border: 1px solid #dbe3ef;
-            border-left: 5px solid #2563eb;
+        .empty-state {
+            padding: 34px;
+            background: #ffffff;
+            border: 1px dashed #94a3b8;
             border-radius: 8px;
-            padding: 16px 18px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+            text-align: center;
         }
-        .metric-card span {
-            display: block;
-            color: #64748b;
-            font-size: 13px;
-            margin-bottom: 7px;
+        .empty-state h3 {
+            margin-top: 0;
         }
-        .metric-card strong {
-            display: block;
-            font-size: 25px;
-            line-height: 1.2;
-            overflow-wrap: anywhere;
-        }
-        .metric-card.low { border-left-color: #16a34a; }
-        .metric-card.warn { border-left-color: #f59e0b; }
-        .metric-card.high { border-left-color: #dc2626; }
-        .finding {
-            display: flex;
-            justify-content: space-between;
-            gap: 18px;
-            align-items: center;
-            padding: 16px 18px;
-            margin: 10px 0;
+        .result-panel {
+            padding: 22px;
+            margin-top: 18px;
             background: #ffffff;
             border: 1px solid #dbe3ef;
             border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
         }
-        .finding p {
-            margin: 6px 0 0 0;
-            color: #475569;
+        .panel-label {
+            display: block;
+            color: #64748b;
+            font-size: 13px;
+            margin-bottom: 8px;
         }
-        .finding span {
-            min-width: 64px;
-            text-align: center;
-            background: #fee2e2;
-            color: #991b1b;
-            border-radius: 6px;
-            padding: 8px 10px;
-            font-weight: 700;
+        .result-panel strong {
+            display: block;
+            font-size: 42px;
+            line-height: 1.1;
+            margin-bottom: 8px;
         }
+        .result-panel strong.low { color: #16a34a; }
+        .result-panel strong.warn { color: #f59e0b; }
+        .result-panel strong.high { color: #dc2626; }
         @media (max-width: 800px) {
-            .hero, .score-row {
-                grid-template-columns: 1fr;
+            .hero {
                 display: grid;
+                grid-template-columns: 1fr;
             }
             .hero h1 {
                 font-size: 34px;
             }
-            .hero-badge {
+            .stage-badge {
                 white-space: normal;
             }
         }
