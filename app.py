@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from forensics import analyze_document_dummy, load_document_preview
+from forensics import analyze_document, load_document_preview
 
 
 st.set_page_config(
@@ -21,7 +21,7 @@ def main() -> None:
     uploaded_file = st.file_uploader(
         "문서 파일 업로드",
         type=["jpg", "jpeg", "png", "pdf"],
-        help="JPG, PNG, PDF를 지원합니다. PDF는 첫 페이지만 미리보기로 변환합니다.",
+        help="JPG, PNG, PDF를 지원합니다. PDF는 첫 페이지만 분석합니다.",
     )
 
     if uploaded_file is None:
@@ -34,34 +34,30 @@ def main() -> None:
         st.error(f"파일을 불러오지 못했습니다: {exc}")
         return
 
-    st.session_state["document_name"] = uploaded_file.name
-    st.session_state["document_image"] = document_image
+    if st.session_state.get("document_name") != uploaded_file.name:
+        st.session_state.pop("analysis_result", None)
 
-    left, right = st.columns([1.15, 0.85], gap="large")
+    st.session_state["document_name"] = uploaded_file.name
+
+    left, right = st.columns([1.1, 0.9], gap="large")
 
     with left:
         st.markdown("### 원본 문서 보기")
         st.image(document_image, caption=uploaded_file.name, use_container_width=True)
 
     with right:
-        st.markdown("### 분석 준비")
-        st.write("업로드된 문서가 정상적으로 로드되었습니다. 아래 버튼을 눌러 1단계 더미 분석을 실행하세요.")
+        st.markdown("### 분석")
+        st.write("ELA, 노이즈 불일치, 블러 차이 분석으로 문서의 조작 의심 영역을 찾습니다.")
 
-        analyze_clicked = st.button(
-            "분석 시작",
-            type="primary",
-            use_container_width=True,
-        )
-
-        if analyze_clicked:
-            with st.spinner("문서 화면 흐름을 검증하는 중입니다..."):
-                st.session_state["analysis_result"] = analyze_document_dummy(uploaded_file.name)
+        if st.button("분석 시작", type="primary", use_container_width=True):
+            with st.spinner("문서 위조 의심 영역을 분석하는 중입니다..."):
+                st.session_state["analysis_result"] = analyze_document(document_image)
 
         result = st.session_state.get("analysis_result")
         if result:
-            _render_dummy_result(result)
+            _render_analysis_result(result)
         else:
-            st.info("아직 분석 결과가 없습니다. 분석 시작 버튼을 눌러 더미 점수를 확인하세요.")
+            st.info("분석 시작 버튼을 누르면 위조 의심 점수와 표시 이미지를 확인할 수 있습니다.")
 
 
 def _render_header() -> None:
@@ -73,7 +69,7 @@ def _render_header() -> None:
             <h1>DocuGuard AI</h1>
             <p class="subtitle">AI로 문서 위조 흔적을 탐지합니다</p>
           </div>
-          <div class="stage-badge">1단계 MVP</div>
+          <div class="stage-badge">OpenCV 분석</div>
         </section>
         """,
         unsafe_allow_html=True,
@@ -85,16 +81,16 @@ def _render_sidebar() -> None:
         st.markdown("## DocuGuard AI")
         st.caption("계약서, 공문, 보험 문서 위조 탐지 MVP")
         st.divider()
-        st.markdown("### 현재 구현 범위")
+        st.markdown("### 분석 항목")
         st.markdown(
             """
-            - 파일 업로드
-            - 이미지/PDF 첫 페이지 미리보기
-            - 분석 버튼
-            - 더미 위조 점수 표시
+            - Error Level Analysis(ELA)
+            - 노이즈 불일치 분석
+            - 선명도/블러 차이 분석
+            - 의심 영역 빨간 박스 표시
             """
         )
-        st.info("이번 단계에서는 복잡한 포렌식 분석 로직을 실행하지 않습니다.")
+        st.info("이 MVP는 1차 스크리닝 도구입니다. 법적 감정에는 원본 파일과 전문 감정 절차가 필요합니다.")
 
 
 def _render_empty_state() -> None:
@@ -109,7 +105,7 @@ def _render_empty_state() -> None:
     )
 
 
-def _render_dummy_result(result: dict[str, str | int]) -> None:
+def _render_analysis_result(result: dict) -> None:
     score = int(result["score"])
     level = str(result["level"])
     level_class = "low" if score < 40 else "warn" if score < 70 else "high"
@@ -124,11 +120,11 @@ def _render_dummy_result(result: dict[str, str | int]) -> None:
         """,
         unsafe_allow_html=True,
     )
-
     st.progress(score / 100)
+    st.markdown("#### 의심 영역 표시 이미지")
+    st.image(result["result_image"], caption="빨간 박스: 위조 의심 영역", use_container_width=True)
     st.markdown("#### 분석 리포트")
-    st.write(result["message"])
-    st.caption("이 점수는 화면 흐름 검증을 위한 더미 값입니다. 실제 탐지 로직은 다음 단계에서 연결합니다.")
+    st.write(result["summary"])
 
 
 def _apply_style() -> None:
