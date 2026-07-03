@@ -24,6 +24,13 @@ st.set_page_config(
 
 def main() -> None:
     _apply_style()
+    if st.query_params.get("view") == "mvp":
+        st.session_state["mvp_entered"] = True
+
+    if not st.session_state.get("mvp_entered"):
+        _render_landing_page()
+        return
+
     mode = _render_sidebar()
     _render_header(mode)
 
@@ -31,6 +38,155 @@ def main() -> None:
         _document_mode()
     else:
         _web_mode()
+
+
+def _render_landing_page() -> None:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] {
+            display: none;
+        }
+        [data-testid="stAppViewContainer"] > .main .block-container {
+            max-width: 1280px;
+            padding-top: 2.2rem;
+        }
+        </style>
+        <main class="landing-shell">
+          <section class="landing-hero reveal">
+            <div class="hero-copy">
+              <h1>DocuGuard AI</h1>
+              <h2>AI 기반 문서·웹페이지 진위 검증 플랫폼</h2>
+              <p>
+                AI가 문서와 웹페이지를 분석하여<br>
+                위조 흔적과 신뢰도를 빠르게 검증합니다.
+              </p>
+            </div>
+            <div class="hero-visual" aria-hidden="true">
+              <div class="visual-grid"></div>
+              <div class="scan-card card-a">
+                <span>Document Trust</span>
+                <strong>98.4%</strong>
+                <i></i>
+              </div>
+              <div class="scan-card card-b">
+                <span>Forgery Signal</span>
+                <strong>AI Review</strong>
+                <i></i>
+              </div>
+              <svg class="network-map" viewBox="0 0 520 360" role="img" aria-label="">
+                <defs>
+                  <linearGradient id="lineFlow" x1="0" x2="1" y1="0" y2="1">
+                    <stop offset="0%" stop-color="#38BDF8" stop-opacity=".18"/>
+                    <stop offset="50%" stop-color="#60A5FA" stop-opacity=".78"/>
+                    <stop offset="100%" stop-color="#06B6D4" stop-opacity=".22"/>
+                  </linearGradient>
+                </defs>
+                <path d="M70 250 C140 110, 240 310, 315 140 S445 125, 470 58" />
+                <path d="M62 112 C165 82, 214 178, 292 205 S398 262, 474 210" />
+                <path d="M118 305 C176 236, 188 134, 270 95 S395 68, 448 150" />
+                <circle cx="70" cy="250" r="7" />
+                <circle cx="315" cy="140" r="8" />
+                <circle cx="470" cy="58" r="6" />
+                <circle cx="292" cy="205" r="7" />
+                <circle cx="118" cy="305" r="6" />
+                <circle cx="270" cy="95" r="8" />
+              </svg>
+            </div>
+          </section>
+
+          <section class="landing-section reveal">
+            <div class="feature-grid">
+              <article class="glass-feature">
+                <div class="feature-icon">01</div>
+                <h3>문서 위조 탐지</h3>
+                <p>ELA 분석, 노이즈 분석, 압축 흔적 분석, PDF 분석을 통해 국소적인 위조 후보를 선별합니다.</p>
+              </article>
+              <article class="glass-feature">
+                <div class="feature-icon">02</div>
+                <h3>웹페이지 진위 검증</h3>
+                <p>스크린샷 분석, 캡처 여부, 웹 위조, 피싱 가능성을 종합적으로 검토합니다.</p>
+              </article>
+              <article class="glass-feature">
+                <div class="feature-icon">03</div>
+                <h3>AI 포렌식 분석</h3>
+                <p>AI 기반 분석, 시각적 결과, 신뢰도, 자동 리포트로 빠른 의사결정을 지원합니다.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="landing-section reveal">
+            <div class="timeline">
+              <div class="timeline-step">
+                <svg class="flow-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 3h7l4 4v14H7z" />
+                  <path d="M14 3v5h5" />
+                  <path d="M9 13h6M9 17h4" />
+                </svg>
+                <b>01</b>
+                <h3>문서 또는 URL 입력</h3>
+              </div>
+              <div class="timeline-step">
+                <svg class="flow-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 8h8v8H8z" />
+                  <path d="M4 10h4M4 14h4M16 10h4M16 14h4M10 4v4M14 4v4M10 16v4M14 16v4" />
+                </svg>
+                <b>02</b>
+                <h3>AI 분석</h3>
+              </div>
+              <div class="timeline-step">
+                <svg class="flow-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 4h14v16H5z" />
+                  <path d="M8 9h8M8 13h5" />
+                  <path d="M15 15l2 2 3-4" />
+                </svg>
+                <b>03</b>
+                <h3>포렌식 결과 생성</h3>
+              </div>
+              <div class="timeline-step">
+                <svg class="flow-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3l8 4v5c0 5-3.4 8-8 9-4.6-1-8-4-8-9V7z" />
+                  <path d="M8.5 12.5l2.2 2.2 4.8-5" />
+                </svg>
+                <b>04</b>
+                <h3>진위 여부 확인</h3>
+              </div>
+            </div>
+          </section>
+
+          <section class="landing-section compare-section reveal">
+            <div class="compare-grid">
+              <article class="compare-card before">
+                <span>기존 방식</span>
+                <h3>느리고 주관적인 수동 검토</h3>
+                <ul>
+                  <li>육안 확인</li>
+                  <li>시간 오래 걸림</li>
+                  <li>전문가 필요</li>
+                  <li>실수 가능</li>
+                </ul>
+              </article>
+              <article class="compare-card after">
+                <span>DocuGuard AI</span>
+                <h3>빠르고 일관된 AI 기반 검증</h3>
+                <ul>
+                  <li>AI 자동 분석</li>
+                  <li>수 초 내 분석</li>
+                  <li>포렌식 기반</li>
+                  <li>신뢰도 제공</li>
+                </ul>
+              </article>
+            </div>
+          </section>
+
+          <section class="landing-cta reveal">
+            <p>몇 초 만에 문서와 웹페이지의 진위 여부를 분석해보세요.</p>
+            <a class="landing-cta-button" href="?view=mvp" target="_self">진위여부 판별하러 가기</a>
+          </section>
+        </main>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _document_mode() -> None:
@@ -610,6 +766,433 @@ def _apply_style() -> None:
             color: var(--dg-blue);
             background: rgba(255, 255, 255, 0.56);
         }
+        .landing-shell {
+            position: relative;
+            z-index: 1;
+            color: #0f172a;
+        }
+        .landing-shell::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            background:
+                linear-gradient(115deg, rgba(255,255,255,0.98) 0%, rgba(241,247,253,0.92) 40%, rgba(226,241,255,0.80) 100%),
+                radial-gradient(ellipse at 16% 12%, rgba(56, 189, 248, 0.24), transparent 34%),
+                radial-gradient(ellipse at 88% 18%, rgba(37, 99, 235, 0.18), transparent 35%),
+                radial-gradient(ellipse at 56% 92%, rgba(6, 182, 212, 0.14), transparent 40%);
+        }
+        .landing-shell::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            opacity: 0.72;
+            background-image:
+                linear-gradient(rgba(37, 99, 235, 0.07) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(37, 99, 235, 0.06) 1px, transparent 1px),
+                linear-gradient(135deg, transparent 0 48%, rgba(56, 189, 248, 0.10) 48.1% 48.4%, transparent 48.5%);
+            background-size: 72px 72px, 72px 72px, 220px 220px;
+            mask-image: linear-gradient(to bottom, rgba(0,0,0,0.78), rgba(0,0,0,0.36) 62%, transparent 100%);
+            animation: dgGridDrift 32s linear infinite;
+        }
+        .landing-hero {
+            position: relative;
+            display: grid;
+            grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
+            align-items: center;
+            min-height: 620px;
+            gap: 54px;
+            padding: 58px 0 74px;
+        }
+        .landing-hero::before {
+            content: "";
+            position: absolute;
+            inset: 4% -5% 8%;
+            z-index: -1;
+            background:
+                linear-gradient(120deg, rgba(15, 23, 42, 0.05), transparent 36%),
+                radial-gradient(ellipse at 72% 42%, rgba(37, 99, 235, 0.16), transparent 42%);
+            filter: blur(18px);
+        }
+        .hero-copy h1 {
+            margin: 0 0 16px;
+            color: #0f172a;
+            font-size: 72px;
+            line-height: 1;
+            letter-spacing: 0;
+        }
+        .hero-copy h2 {
+            margin: 0;
+            color: #1e293b;
+            font-size: 34px;
+            line-height: 1.22;
+            font-weight: 700;
+            letter-spacing: 0;
+        }
+        .hero-copy p {
+            max-width: 560px;
+            margin: 30px 0 0;
+            color: #475569;
+            font-size: 22px;
+            line-height: 1.78;
+        }
+        .hero-visual {
+            position: relative;
+            min-height: 500px;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 8px;
+            overflow: hidden;
+            background:
+                radial-gradient(ellipse at 50% 42%, rgba(56, 189, 248, 0.22), transparent 38%),
+                linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.92) 48%, rgba(15, 91, 124, 0.82));
+            box-shadow: 0 36px 110px rgba(15, 23, 42, 0.22);
+        }
+        .hero-visual::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.20), transparent),
+                repeating-linear-gradient(0deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 34px),
+                repeating-linear-gradient(90deg, rgba(255,255,255,0.065) 0 1px, transparent 1px 34px);
+            opacity: 0.5;
+            animation: dgGradientMotion 10s ease-in-out infinite alternate;
+        }
+        .hero-visual::after {
+            content: "";
+            position: absolute;
+            inset: 14%;
+            border: 1px solid rgba(125, 211, 252, 0.18);
+            background:
+                linear-gradient(135deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03)),
+                repeating-linear-gradient(135deg, transparent 0 18px, rgba(56,189,248,0.12) 19px 20px);
+            transform: perspective(800px) rotateX(58deg) rotateZ(-12deg);
+            filter: drop-shadow(0 0 28px rgba(56, 189, 248, 0.28));
+        }
+        .visual-grid {
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(120deg, transparent 0 28%, rgba(96, 165, 250, 0.16) 28.2% 28.5%, transparent 28.7%),
+                linear-gradient(42deg, transparent 0 63%, rgba(6, 182, 212, 0.20) 63.1% 63.5%, transparent 63.7%);
+            animation: dgHeroLight 12s ease-in-out infinite alternate;
+        }
+        .network-map {
+            position: absolute;
+            inset: 54px 32px auto;
+            width: calc(100% - 64px);
+            height: 360px;
+            overflow: visible;
+        }
+        .network-map path {
+            fill: none;
+            stroke: url(#lineFlow);
+            stroke-width: 2;
+            stroke-linecap: round;
+            filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.35));
+            stroke-dasharray: 9 13;
+            animation: dgDash 14s linear infinite;
+        }
+        .network-map circle {
+            fill: #e0f2fe;
+            stroke: rgba(56, 189, 248, 0.92);
+            stroke-width: 3;
+            filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.58));
+            animation: dgPulse 2.8s ease-in-out infinite alternate;
+        }
+        .scan-card {
+            position: absolute;
+            width: 190px;
+            padding: 18px;
+            border: 1px solid rgba(226, 232, 240, 0.22);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.10);
+            color: #e0f2fe;
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+            backdrop-filter: blur(18px);
+            animation: dgFloat 7s ease-in-out infinite;
+        }
+        .scan-card span {
+            display: block;
+            color: rgba(224, 242, 254, 0.72);
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+        .scan-card strong {
+            display: block;
+            font-size: 25px;
+            letter-spacing: 0;
+        }
+        .scan-card i {
+            display: block;
+            height: 3px;
+            margin-top: 14px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #38bdf8, #60a5fa, transparent);
+            box-shadow: 0 0 18px rgba(56, 189, 248, 0.42);
+        }
+        .card-a {
+            right: 34px;
+            top: 54px;
+        }
+        .card-b {
+            left: 36px;
+            bottom: 42px;
+            animation-delay: -2.4s;
+        }
+        .landing-section {
+            padding: 78px 0;
+        }
+        .feature-grid,
+        .compare-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 18px;
+        }
+        .glass-feature,
+        .compare-card,
+        .timeline-step {
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 8px;
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.76), rgba(241, 247, 253, 0.54));
+            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(18px);
+        }
+        .glass-feature {
+            min-height: 250px;
+            padding: 36px;
+            transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+        }
+        .glass-feature::before,
+        .compare-card::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(110deg, rgba(37, 99, 235, 0.12), transparent 38%),
+                radial-gradient(ellipse at 80% 18%, rgba(56, 189, 248, 0.16), transparent 30%);
+            opacity: 0;
+            transition: opacity 180ms ease;
+        }
+        .glass-feature:hover {
+            transform: translateY(-6px);
+            border-color: rgba(37, 99, 235, 0.30);
+            box-shadow: 0 30px 86px rgba(37, 99, 235, 0.14);
+        }
+        .glass-feature:hover::before,
+        .compare-card.after::before {
+            opacity: 1;
+        }
+        .glass-feature > *,
+        .compare-card > * {
+            position: relative;
+            z-index: 1;
+        }
+        .feature-icon {
+            display: grid;
+            place-items: center;
+            width: 48px;
+            height: 48px;
+            border: 1px solid rgba(37, 99, 235, 0.20);
+            border-radius: 8px;
+            background: rgba(37, 99, 235, 0.08);
+            color: #2563eb;
+            font-weight: 800;
+            margin-bottom: 26px;
+        }
+        .glass-feature h3,
+        .compare-card h3,
+        .timeline-step h3 {
+            margin: 0 0 12px;
+            color: #0f172a;
+            font-size: 32px;
+            line-height: 1.22;
+        }
+        .glass-feature p {
+            margin: 0;
+            color: #475569;
+            font-size: 18px;
+            line-height: 1.75;
+        }
+        .timeline-step h3 {
+            font-size: 36px;
+            line-height: 1.3;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+        }
+        .timeline {
+            position: relative;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 18px;
+        }
+        .timeline::before {
+            content: "";
+            position: absolute;
+            left: 8%;
+            right: 8%;
+            top: 50%;
+            height: 2px;
+            background: linear-gradient(90deg, rgba(37, 99, 235, 0.12), rgba(56, 189, 248, 0.62), rgba(37, 99, 235, 0.12));
+            box-shadow: 0 0 28px rgba(56, 189, 248, 0.24);
+        }
+        .timeline-step {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 220px;
+            padding: 44px;
+            animation: dgRise 700ms ease both;
+        }
+        .flow-icon {
+            position: absolute;
+            right: 22px;
+            top: 22px;
+            width: 34px;
+            height: 34px;
+            color: #2563eb;
+            opacity: 0.78;
+            filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.18));
+        }
+        .flow-icon path {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 1.7;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .timeline-step b {
+            display: grid;
+            place-items: center;
+            width: 54px;
+            height: 54px;
+            margin-bottom: 28px;
+            border-radius: 999px;
+            color: #ffffff;
+            background: linear-gradient(135deg, #2563eb, #06b6d4);
+            box-shadow: 0 16px 34px rgba(37, 99, 235, 0.24);
+            font-size: 17px;
+            font-weight: 800;
+        }
+        .compare-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .compare-card {
+            padding: 46px;
+            min-height: 350px;
+        }
+        .compare-card span {
+            display: block;
+            color: #64748b;
+            font-size: 32px;
+            line-height: 1.35;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+            margin-bottom: 14px;
+        }
+        .compare-card h3 {
+            font-size: 34px;
+            line-height: 1.35;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+        }
+        .compare-card ul {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+            padding: 0;
+            margin: 34px 0 0;
+            list-style: none;
+        }
+        .compare-card li {
+            padding: 18px 20px;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.58);
+            color: #334155;
+            font-size: 23px;
+            line-height: 1.55;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+        }
+        .compare-card.after {
+            border-color: rgba(37, 99, 235, 0.32);
+            box-shadow: 0 30px 88px rgba(37, 99, 235, 0.13);
+        }
+        .compare-card.after span {
+            color: #2563eb;
+        }
+        .landing-cta {
+            position: relative;
+            overflow: hidden;
+            margin: 54px 0 24px;
+            padding: 78px 34px 56px;
+            text-align: center;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 8px;
+            background:
+                linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.94) 52%, rgba(14, 116, 144, 0.86)),
+                radial-gradient(ellipse at 50% 0%, rgba(56, 189, 248, 0.28), transparent 38%);
+            box-shadow: 0 34px 100px rgba(15, 23, 42, 0.20);
+        }
+        .landing-cta::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.16), transparent),
+                repeating-linear-gradient(90deg, transparent 0 42px, rgba(255,255,255,0.08) 43px 44px);
+            animation: dgGradientMotion 11s ease-in-out infinite alternate;
+        }
+        .landing-cta > * {
+            position: relative;
+            z-index: 1;
+        }
+        .landing-cta p {
+            max-width: 760px;
+            margin: 0 auto;
+            color: rgba(224, 242, 254, 0.84);
+            font-size: 30px;
+            line-height: 1.75;
+            font-weight: 700;
+        }
+        .landing-cta-button {
+            position: relative;
+            z-index: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 360px;
+            min-height: 78px;
+            margin-top: 42px;
+            padding: 0 42px;
+            border-radius: 999px;
+            border: 1px solid rgba(224, 242, 254, 0.32);
+            color: #ffffff !important;
+            font-size: 24px;
+            font-weight: 800;
+            text-decoration: none !important;
+            background: linear-gradient(135deg, #2563eb, #38bdf8 52%, #06b6d4);
+            box-shadow: 0 18px 46px rgba(37, 99, 235, 0.34), 0 0 32px rgba(56, 189, 248, 0.22);
+            transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+        }
+        .landing-cta-button:hover {
+            transform: translateY(-2px) scale(1.03);
+            filter: brightness(1.06);
+            box-shadow: 0 30px 72px rgba(37, 99, 235, 0.46), 0 0 56px rgba(56, 189, 248, 0.42);
+        }
+        .reveal {
+            animation: dgReveal 760ms ease both;
+        }
+        .reveal:nth-child(2) { animation-delay: 90ms; }
+        .reveal:nth-child(3) { animation-delay: 160ms; }
+        .reveal:nth-child(4) { animation-delay: 220ms; }
+        .reveal:nth-child(5) { animation-delay: 280ms; }
         @keyframes dgGridDrift {
             from { background-position: 0 0, 0 0, 0 0, 0 0; }
             to { background-position: 72px 72px, -72px 72px, 36px 72px, -44px 88px; }
@@ -621,6 +1204,29 @@ def _apply_style() -> None:
         @keyframes dgHeroLight {
             from { opacity: 0.62; transform: translateX(-8px); }
             to { opacity: 0.95; transform: translateX(8px); }
+        }
+        @keyframes dgReveal {
+            from { opacity: 0; transform: translateY(22px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes dgGradientMotion {
+            from { transform: translateX(-4%); opacity: 0.44; }
+            to { transform: translateX(4%); opacity: 0.82; }
+        }
+        @keyframes dgDash {
+            to { stroke-dashoffset: -180; }
+        }
+        @keyframes dgPulse {
+            from { opacity: 0.72; transform: scale(0.98); }
+            to { opacity: 1; transform: scale(1.04); }
+        }
+        @keyframes dgFloat {
+            0%, 100% { transform: translate3d(0, 0, 0); }
+            50% { transform: translate3d(0, -10px, 0); }
+        }
+        @keyframes dgRise {
+            from { opacity: 0; transform: translateY(14px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         @media (max-width: 800px) {
             [data-testid="stAppViewContainer"] > .main .block-container {
@@ -638,6 +1244,159 @@ def _apply_style() -> None:
             }
             .stage-badge {
                 white-space: normal;
+            }
+            .landing-hero,
+            .feature-grid,
+            .timeline,
+            .compare-grid {
+                grid-template-columns: 1fr;
+            }
+            .landing-hero {
+                min-height: auto;
+                gap: 28px;
+                padding: 36px 0 46px;
+            }
+            .hero-copy h1 {
+                font-size: 42px;
+                line-height: 1.04;
+            }
+            .hero-copy h2 {
+                font-size: 22px;
+                line-height: 1.28;
+            }
+            .hero-copy p {
+                margin-top: 22px;
+                font-size: 17px;
+                line-height: 1.78;
+            }
+            .landing-section {
+                padding: 56px 0;
+            }
+            .glass-feature,
+            .compare-card,
+            .timeline-step {
+                padding: 28px;
+            }
+            .glass-feature h3,
+            .compare-card h3 {
+                font-size: 24px;
+            }
+            .glass-feature p,
+            .compare-card li {
+                font-size: 18px;
+                line-height: 1.6;
+                font-weight: 600;
+            }
+            .timeline-step h3 {
+                font-size: 24px;
+                line-height: 1.35;
+                font-weight: 800;
+                letter-spacing: 0.01em;
+            }
+            .timeline-step {
+                min-height: 178px;
+            }
+            .timeline-step b {
+                width: 48px;
+                height: 48px;
+                margin-bottom: 22px;
+                font-size: 15px;
+            }
+            .compare-card span,
+            .compare-card h3 {
+                font-size: 24px;
+                line-height: 1.45;
+                font-weight: 800;
+                letter-spacing: 0.01em;
+            }
+            .hero-visual {
+                min-height: 380px;
+            }
+            .timeline::before {
+                left: 32px;
+                right: auto;
+                top: 26px;
+                bottom: 26px;
+                width: 2px;
+                height: auto;
+            }
+            .compare-card ul {
+                grid-template-columns: 1fr;
+            }
+            .landing-cta {
+                padding: 56px 22px 36px;
+            }
+            .landing-cta p {
+                font-size: 24px;
+                line-height: 1.72;
+            }
+            .landing-cta-button {
+                min-width: 100%;
+                min-height: 72px;
+                font-size: 22px;
+                padding: 0 24px;
+            }
+        }
+        @media (min-width: 801px) and (max-width: 1100px) {
+            .landing-hero {
+                grid-template-columns: 1fr;
+            }
+            .hero-copy h1 {
+                font-size: 56px;
+                line-height: 1.02;
+            }
+            .hero-copy h2 {
+                font-size: 28px;
+            }
+            .hero-copy p {
+                font-size: 20px;
+                line-height: 1.78;
+            }
+            .feature-grid,
+            .timeline {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .glass-feature {
+                padding: 32px;
+            }
+            .compare-card,
+            .timeline-step {
+                padding: 36px;
+            }
+            .glass-feature h3,
+            .compare-card h3 {
+                font-size: 28px;
+            }
+            .glass-feature p,
+            .compare-card li {
+                font-size: 20px;
+                line-height: 1.58;
+                font-weight: 600;
+            }
+            .timeline-step h3 {
+                font-size: 30px;
+                line-height: 1.32;
+                font-weight: 800;
+            }
+            .compare-card span,
+            .compare-card h3 {
+                font-size: 28px;
+                line-height: 1.42;
+                font-weight: 800;
+            }
+            .timeline-step {
+                min-height: 198px;
+            }
+            .timeline-step b {
+                width: 50px;
+                height: 50px;
+                margin-bottom: 24px;
+            }
+            .landing-cta p {
+                font-size: 28px;
+            }
+            .timeline::before {
+                display: none;
             }
         }
         </style>
