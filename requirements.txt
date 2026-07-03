@@ -1,7 +1,15 @@
 streamlit>=1.46.0
-Pillow>=10.4.0
 PyMuPDF>=1.24.9
+pypdf>=4.3.1
+pdfplumber>=0.11.4
+easyocr>=1.7.2
 opencv-python-headless>=4.10.0
+Pillow>=10.4.0
 numpy>=2.0.0
+pandas>=2.2.2
+scikit-image>=0.24.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
+tldextract>=5.1.2
+pytesseract>=0.3.13
+python-whois>=0.9.4

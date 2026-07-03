@@ -19,6 +19,13 @@ from document_vault import (
     sort_vault_items,
     utc_now_iso,
 )
+from analyzers.ai_report import build_rule_based_report
+from analyzers.image_forensics import analyze_image_forensics
+from analyzers.ocr_analyzer import analyze_ocr
+from analyzers.pdf_analyzer import analyze_pdf
+from analyzers.scoring import combine_results, recommended_actions
+from analyzers.text_analyzer import analyze_text
+from analyzers.url_analyzer import analyze_url_risk
 from forensics import analyze_document, load_document_pages
 from sample_generator import create_contract_sample
 from web_forensics import analyze_url
@@ -488,7 +495,9 @@ def _web_mode() -> None:
                 st.warning("먼저 웹페이지 캡처 이미지를 업로드하세요.")
             else:
                 with st.spinner("캡처 이미지의 부분 편집 후보를 분석하는 중입니다..."):
-                    st.session_state["web_capture_result"] = analyze_document(image)
+                    capture_result = analyze_document(image)
+                    capture_result["analyzer_result"] = analyze_image_forensics(image, "웹 캡처")
+                    st.session_state["web_capture_result"] = capture_result
 
     with url_col:
         st.markdown("#### URL")
@@ -498,7 +507,13 @@ def _web_mode() -> None:
                 st.warning("먼저 URL을 입력하세요.")
             else:
                 with st.spinner("접속 가능 여부, 리다이렉트, 도메인, 의심 키워드를 확인하는 중입니다..."):
-                    st.session_state["web_url_result"] = analyze_url(url)
+                    url_analysis = analyze_url_risk(url)
+                    page_text = url_analysis.get("raw", {}).get("text", "")
+                    text_analysis = analyze_text(page_text, name="웹페이지 텍스트 이상 탐지")
+                    summary = combine_results([url_analysis, text_analysis])
+                    summary["report"] = build_rule_based_report(summary)
+                    summary["legacy"] = analyze_url(url)
+                    st.session_state["web_url_result"] = summary
 
     capture_result = st.session_state.get("web_capture_result")
     url_result = st.session_state.get("web_url_result")
@@ -523,6 +538,7 @@ def _select_document() -> list:
     )
 
     if uploaded_file is not None:
+        uploaded_bytes = uploaded_file.getvalue()
         try:
             pages = load_document_pages(uploaded_file)
         except Exception as exc:
@@ -531,33 +547,77 @@ def _select_document() -> list:
 
         current_key = f"{uploaded_file.name}:{uploaded_file.size}"
         if st.session_state.get("document_key") != current_key:
-            _set_document(pages, uploaded_file.name, current_key, uploaded_file.type)
+            _set_document(pages, uploaded_file.name, current_key, uploaded_file.type, uploaded_bytes)
 
     return st.session_state.get("document_pages", [])
 
 
-def _set_document(pages: list, name: str, key: str | None = None, document_type: str | None = None) -> None:
+def _set_document(
+    pages: list,
+    name: str,
+    key: str | None = None,
+    document_type: str | None = None,
+    document_bytes: bytes | None = None,
+) -> None:
     st.session_state["document_pages"] = pages
     st.session_state["document_name"] = name
     st.session_state["document_key"] = key or name
     st.session_state["document_type"] = document_type or name.rsplit(".", 1)[-1].upper()
+    st.session_state["document_bytes"] = document_bytes
     st.session_state["document_uploaded_at"] = utc_now_iso()
     st.session_state.pop("analysis_results", None)
+    st.session_state.pop("analysis_summary", None)
 
 
 def _run_document_analysis(pages: list) -> None:
     progress = st.progress(0)
     results = []
+    analyzer_results = []
 
     with st.spinner("모든 페이지의 추가 검토 후보를 분석하는 중입니다..."):
         total = len(pages)
         for index, page in enumerate(pages, start=1):
             result = analyze_document(page)
             result["page"] = index
+            image_result = analyze_image_forensics(page, f"{index}페이지")
+            result["analyzer_result"] = image_result
             results.append(result)
+            analyzer_results.append(image_result)
             progress.progress(index / total)
 
+        document_bytes = st.session_state.get("document_bytes")
+        document_name = st.session_state.get("document_name", "document")
+        document_type = str(st.session_state.get("document_type", "")).lower()
+        pdf_text = ""
+
+        if document_bytes and ("pdf" in document_type or str(document_name).lower().endswith(".pdf")):
+            pdf_result = analyze_pdf(document_bytes, str(document_name))
+            analyzer_results.append(pdf_result)
+            pdf_text = "\n".join(pdf_result.get("raw", {}).get("page_texts", []))
+
+        ocr_result = analyze_ocr(pages, pdf_text)
+        analyzer_results.append(ocr_result)
+
+        combined_text = "\n".join(
+            part
+            for part in [
+                pdf_text,
+                ocr_result.get("raw", {}).get("text", ""),
+            ]
+            if part
+        )
+        analyzer_results.append(
+            analyze_text(
+                combined_text,
+                required_keywords=["date", "amount", "signature"],
+                name="문서 텍스트 이상 탐지",
+            )
+        )
+
+    summary = combine_results(analyzer_results)
+    summary["report"] = build_rule_based_report(summary)
     st.session_state["analysis_results"] = results
+    st.session_state["analysis_summary"] = summary
     _save_current_document_to_vault(pages, results)
 
 
@@ -808,6 +868,10 @@ def _render_empty_state(title: str, body: str) -> None:
 
 
 def _render_document_results(results: list[dict]) -> None:
+    summary = st.session_state.get("analysis_summary")
+    if summary:
+        _render_analysis_summary(summary)
+
     max_score = max(int(result["score"]) for result in results)
     high_page = max(results, key=lambda result: int(result["score"]))
     level_class = "low" if max_score < 40 else "warn" if max_score < 70 else "high"
@@ -834,26 +898,101 @@ def _render_document_results(results: list[dict]) -> None:
             st.write(_translate_text(result["summary"]))
             for reason in result["reasons"]:
                 st.markdown(f"- {_translate_text(reason)}")
+            analyzer_result = result.get("analyzer_result")
+            if analyzer_result:
+                with st.expander("기술 분석 로그"):
+                    st.json(
+                        {
+                            "score": analyzer_result.get("score"),
+                            "max_score": analyzer_result.get("max_score"),
+                            "risk_level": analyzer_result.get("risk_level"),
+                            "suspicious_points": analyzer_result.get("suspicious_points", []),
+                            "safe_points": analyzer_result.get("safe_points", []),
+                            "logs": analyzer_result.get("logs", []),
+                        }
+                    )
+
+
+def _render_analysis_summary(summary: dict) -> None:
+    score = int(summary.get("score", 0))
+    confidence = int(summary.get("confidence", 0))
+    verdict = str(summary.get("verdict", "추가 확인 필요"))
+    level_class = "low" if score < 35 else "warn" if score < 65 else "high"
+
+    metric_cols = st.columns(3)
+    metric_cols[0].metric("최종 판정", verdict)
+    metric_cols[1].metric("전체 위험 점수", f"{score}/100")
+    metric_cols[2].metric("신뢰도", f"{confidence}%")
+
+    st.progress(score / 100)
+    st.markdown(
+        f"""
+        <div class="result-panel">
+          <span class="panel-label">통합 분석 엔진 결과</span>
+          <strong class="{level_class}">{score}/100</strong>
+          <p>AI는 최종 판정자가 아니라 분석 결과를 설명하는 보조 역할만 합니다.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("분석 항목별 점수", expanded=True):
+        for item in summary.get("analyzers", []):
+            item_score = int(item.get("score", 0))
+            item_max = int(item.get("max_score", 100))
+            st.write(f"**{item.get('name', '분석 항목')}** · {item_score}/{item_max} · {item.get('risk_level', '-')}")
+            st.progress(min(item_score / max(item_max, 1), 1.0))
+
+    signal_tabs = st.tabs(["의심 사인", "안전 사인", "추천 조치", "기술 로그", "리포트"])
+    with signal_tabs[0]:
+        points = summary.get("suspicious_points", [])
+        if points:
+            for point in points:
+                st.markdown(f"- {point}")
+        else:
+            st.info("강한 의심 신호가 많지 않습니다.")
+    with signal_tabs[1]:
+        points = summary.get("safe_points", [])
+        if points:
+            for point in points:
+                st.markdown(f"- {point}")
+        else:
+            st.info("별도 안전 신호가 충분히 수집되지 않았습니다.")
+    with signal_tabs[2]:
+        for action in recommended_actions(score):
+            st.markdown(f"- {action}")
+    with signal_tabs[3]:
+        logs = summary.get("logs", [])
+        if logs:
+            for log in logs:
+                st.code(log)
+        else:
+            st.info("분석 로그가 없습니다.")
+    with signal_tabs[4]:
+        st.markdown(summary.get("report") or build_rule_based_report(summary))
 
 
 def _render_web_results(capture_result: dict | None, url_result: dict | None) -> None:
-    capture_score = int(capture_result["score"]) if capture_result else 100
-    url_score = int(url_result["trust_score"]) if url_result else 100
-    trust_score = min(capture_score, url_score)
-    risk_level = _web_risk_level(trust_score)
-    level_class = "low" if trust_score >= 75 else "warn" if trust_score >= 45 else "high"
+    if url_result and "analyzers" in url_result:
+        _render_analysis_summary(url_result)
+
+    capture_score = int(capture_result["score"]) if capture_result else 0
+    url_score = int(url_result["score"]) if url_result and "score" in url_result else 0
+    risk_score = max(capture_score, url_score)
+    risk_level = "위조 의심" if risk_score >= 65 else "추가 확인 필요" if risk_score >= 35 else "정상 가능성 높음"
+    level_class = "low" if risk_score < 35 else "warn" if risk_score < 65 else "high"
 
     st.markdown(
         f"""
         <div class="result-panel">
-          <span class="panel-label">웹 증거 신뢰도 점수</span>
-          <strong class="{level_class}">{trust_score}/100</strong>
+          <span class="panel-label">웹 증거 위험 점수</span>
+          <strong class="{level_class}">{risk_score}/100</strong>
           <p>위험도: <b>{risk_level}</b></p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.progress(trust_score / 100)
+    st.progress(risk_score / 100)
 
     if capture_result:
         st.markdown("#### 캡처 이미지 검토")
@@ -861,24 +1000,28 @@ def _render_web_results(capture_result: dict | None, url_result: dict | None) ->
         st.write(_translate_text(capture_result["summary"]))
         for reason in capture_result["reasons"]:
             st.markdown(f"- {_translate_text(reason)}")
+        if capture_result.get("analyzer_result"):
+            with st.expander("캡처 이미지 기술 로그"):
+                st.json(capture_result["analyzer_result"])
 
     if url_result:
+        legacy = url_result.get("legacy", url_result)
         st.markdown("#### URL 위험 요소 리포트")
-        st.write(f"접속 가능 여부: `{url_result['reachable']}`")
-        st.write(f"상태 코드: `{url_result['status_code']}`")
-        st.write(f"프로토콜: `{url_result['scheme']}`")
-        st.write(f"도메인: `{url_result['domain']}`")
-        st.write(f"페이지 제목: `{url_result['title'] or '(제목 없음)'}`")
-        st.write(f"최종 접속 URL: `{url_result['final_url']}`")
+        st.write(f"접속 가능 여부: `{legacy.get('reachable')}`")
+        st.write(f"상태 코드: `{legacy.get('status_code')}`")
+        st.write(f"프로토콜: `{legacy.get('scheme')}`")
+        st.write(f"도메인: `{legacy.get('domain')}`")
+        st.write(f"페이지 제목: `{legacy.get('title') or '(제목 없음)'}`")
+        st.write(f"최종 접속 URL: `{legacy.get('final_url')}`")
 
-        redirect = url_result["redirect"]
+        redirect = legacy.get("redirect", {})
         if redirect.get("redirected"):
             st.warning(redirect.get("warning") or "입력 URL과 최종 접속 URL이 다릅니다.")
-        if url_result.get("error"):
-            st.warning(url_result["error"])
+        if legacy.get("error"):
+            st.warning(legacy["error"])
 
         st.markdown("##### 의심 사유")
-        for reason in url_result["reasons"]:
+        for reason in legacy.get("reasons", []):
             st.markdown(f"- {reason}")
 
 
