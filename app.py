@@ -38,13 +38,11 @@ st.set_page_config(
 
 def main() -> None:
     _apply_style()
-    if st.query_params.get("view") == "mvp":
-        st.session_state["mvp_entered"] = True
-
-    if not st.session_state.get("mvp_entered"):
+    if st.query_params.get("view") != "mvp":
         _render_landing_page()
         return
 
+    _show_mvp_sidebar()
     mode = _render_sidebar()
     _render_header(mode)
 
@@ -58,8 +56,8 @@ def _render_landing_page() -> None:
     st.markdown(
         """
         <style>
-        [data-testid="stSidebar"] {
-            display: none;
+        body:has(.landing-shell) [data-testid="stSidebar"] {
+            display: none !important;
         }
         [data-testid="stAppViewContainer"] > .main .block-container {
             max-width: 1280px;
@@ -198,6 +196,27 @@ def _render_landing_page() -> None:
             <a class="landing-cta-button" href="?view=mvp" target="_self">진위여부 판별하러 가기</a>
           </section>
         </main>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _show_mvp_sidebar() -> None:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] {
+            display: block !important;
+            visibility: visible !important;
+            min-width: 21rem !important;
+            width: 21rem !important;
+            transform: translateX(0) !important;
+            opacity: 1 !important;
+        }
+        [data-testid="stSidebarCollapsedControl"] {
+            display: none !important;
+        }
+        </style>
         """,
         unsafe_allow_html=True,
     )
