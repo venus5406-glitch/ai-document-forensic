@@ -42,8 +42,13 @@ def main() -> None:
         _render_landing_page()
         return
 
-    _show_mvp_sidebar()
+    sidebar_mode = st.query_params.get("sidebar")
+    if "mvp_sidebar_pinned" not in st.session_state or sidebar_mode in {"pinned", "auto"}:
+        st.session_state["mvp_sidebar_pinned"] = sidebar_mode != "auto"
+
+    _show_mvp_sidebar(st.session_state["mvp_sidebar_pinned"])
     mode = _render_sidebar()
+    _render_mvp_navbar()
     _render_header(mode)
 
     if mode == DOCUMENT_MODE:
@@ -53,8 +58,7 @@ def main() -> None:
 
 
 def _render_landing_page() -> None:
-    st.markdown(
-        """
+    landing_markup = """
         <style>
         body:has(.landing-shell) [data-testid="stSidebar"] {
             display: none !important;
@@ -105,6 +109,13 @@ def _render_landing_page() -> None:
                 <circle cx="270" cy="95" r="8" />
               </svg>
             </div>
+            <a class="landing-cta-button hero-cta-button" href="?view=mvp" target="_self">
+              <span>진위여부 판별하러 가기</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h14" />
+                <path d="M13 6l6 6-6 6" />
+              </svg>
+            </a>
           </section>
 
           <section class="landing-section reveal">
@@ -191,17 +202,15 @@ def _render_landing_page() -> None:
             </div>
           </section>
 
-          <section class="landing-cta reveal">
-            <p>몇 초 만에 문서와 웹페이지의 진위 여부를 분석해보세요.</p>
-            <a class="landing-cta-button" href="?view=mvp" target="_self">진위여부 판별하러 가기</a>
-          </section>
         </main>
-        """,
+        """
+    st.markdown(
+        landing_markup,
         unsafe_allow_html=True,
     )
 
 
-def _show_mvp_sidebar() -> None:
+def _show_mvp_sidebar(is_pinned: bool) -> None:
     st.markdown(
         """
         <style>
@@ -213,12 +222,199 @@ def _show_mvp_sidebar() -> None:
             transform: translateX(0) !important;
             opacity: 1 !important;
         }
-        [data-testid="stSidebarCollapsedControl"] {
-            display: none !important;
-        }
         </style>
         """,
         unsafe_allow_html=True,
+    )
+    _install_sidebar_reveal_controller(is_pinned)
+
+
+def _render_mvp_navbar() -> None:
+    st.markdown(
+        """
+        <nav class="mvp-navbar" aria-label="MVP navigation">
+          <a href="/" target="_self">HOME</a>
+          <span class="mvp-navbar-divider"></span>
+          <strong>DocuGuard AI</strong>
+        </nav>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _install_sidebar_reveal_controller(is_pinned: bool) -> None:
+    components.html(
+        f"""
+        <script>
+        (() => {{
+          const doc = window.parent.document;
+          const pinned = {json.dumps(is_pinned)};
+          const styleId = "dg-sidebar-reveal-style";
+          const edgeId = "dg-sidebar-reveal-edge";
+          const indicatorId = "dg-sidebar-reveal-indicator";
+
+          let style = doc.getElementById(styleId);
+          if (!style) {{
+            style = doc.createElement("style");
+            style.id = styleId;
+            doc.head.appendChild(style);
+          }}
+          style.textContent = `
+            #${{edgeId}} {{
+              position: fixed;
+              inset: 0 auto 0 0;
+              width: 18px;
+              z-index: 999998;
+              background: transparent;
+              pointer-events: auto;
+            }}
+            #${{indicatorId}} {{
+              position: fixed;
+              left: 10px;
+              top: 50%;
+              z-index: 999999;
+              display: grid;
+              place-items: center;
+              width: 28px;
+              height: 48px;
+              border: 1px solid rgba(148, 163, 184, 0.24);
+              border-radius: 0 8px 8px 0;
+              background: rgba(255, 255, 255, 0.62);
+              color: #2563eb;
+              box-shadow: 0 16px 34px rgba(37, 99, 235, 0.14);
+              backdrop-filter: blur(14px);
+              opacity: 0;
+              transform: translate(-12px, -50%);
+              transition: opacity 280ms ease-in-out, transform 280ms ease-in-out;
+              font-size: 26px;
+              font-weight: 800;
+              line-height: 1;
+              cursor: pointer;
+              user-select: none;
+            }}
+            body.dg-sidebar-hidden #${{edgeId}}:hover + #${{indicatorId}},
+            body.dg-sidebar-edge-hover #${{indicatorId}},
+            body.dg-sidebar-open #${{indicatorId}} {{
+              opacity: 1;
+              transform: translate(0, -50%);
+            }}
+            body.dg-sidebar-reveal-enabled [data-testid="stSidebar"] {{
+              transition: transform 320ms ease-in-out, opacity 320ms ease-in-out, box-shadow 320ms ease-in-out !important;
+              will-change: transform, opacity;
+              z-index: 999997 !important;
+            }}
+            body.dg-sidebar-reveal-enabled.dg-sidebar-hidden [data-testid="stSidebar"] {{
+              transform: translateX(calc(-100% + 2px)) !important;
+              opacity: 0.06 !important;
+              pointer-events: none;
+            }}
+            body.dg-sidebar-reveal-enabled.dg-sidebar-open [data-testid="stSidebar"],
+            body.dg-sidebar-reveal-enabled.dg-sidebar-pinned [data-testid="stSidebar"] {{
+              transform: translateX(0) !important;
+              opacity: 1 !important;
+              pointer-events: auto;
+              box-shadow: 18px 0 54px rgba(15, 23, 42, 0.12);
+            }}
+            body.dg-sidebar-pinned #${{edgeId}},
+            body.dg-sidebar-pinned #${{indicatorId}} {{
+              display: none;
+            }}
+            @media (hover: none), (max-width: 800px) {{
+              #${{edgeId}} {{
+                width: 44px;
+              }}
+              #${{indicatorId}} {{
+                opacity: 1;
+                transform: translate(0, -50%);
+              }}
+            }}
+          `;
+
+          let edge = doc.getElementById(edgeId);
+          if (!edge) {{
+            edge = doc.createElement("div");
+            edge.id = edgeId;
+            doc.body.appendChild(edge);
+          }}
+
+          let indicator = doc.getElementById(indicatorId);
+          if (!indicator) {{
+            indicator = doc.createElement("div");
+            indicator.id = indicatorId;
+            indicator.setAttribute("aria-label", "사이드바 펼치기");
+            indicator.textContent = "›";
+            doc.body.appendChild(indicator);
+          }}
+
+          const body = doc.body;
+          body.classList.add("dg-sidebar-reveal-enabled");
+          body.classList.toggle("dg-sidebar-pinned", pinned);
+          body.classList.toggle("dg-sidebar-hidden", !pinned);
+          body.classList.toggle("dg-sidebar-open", pinned);
+          indicator.textContent = pinned ? "‹" : "›";
+
+          let hideTimer = null;
+          let interacting = false;
+
+          const sidebar = () => doc.querySelector('[data-testid="stSidebar"]');
+          const clearHide = () => {{
+            if (hideTimer) window.clearTimeout(hideTimer);
+            hideTimer = null;
+          }};
+          const openSidebar = () => {{
+            if (pinned) return;
+            clearHide();
+            body.classList.remove("dg-sidebar-hidden");
+            body.classList.add("dg-sidebar-open");
+            indicator.textContent = "‹";
+          }};
+          const scheduleHide = () => {{
+            if (pinned || interacting) return;
+            clearHide();
+            hideTimer = window.setTimeout(() => {{
+              if (interacting) return;
+              body.classList.add("dg-sidebar-hidden");
+              body.classList.remove("dg-sidebar-open");
+              indicator.textContent = "›";
+            }}, 650);
+          }};
+          const markInteraction = () => {{
+            interacting = true;
+            window.setTimeout(() => {{
+              interacting = false;
+            }}, 900);
+          }};
+
+          edge.onmouseenter = () => {{
+            body.classList.add("dg-sidebar-edge-hover");
+            openSidebar();
+          }};
+          edge.onmouseleave = () => {{
+            body.classList.remove("dg-sidebar-edge-hover");
+            scheduleHide();
+          }};
+          indicator.onclick = () => {{
+            if (body.classList.contains("dg-sidebar-open")) scheduleHide();
+            else openSidebar();
+          }};
+
+          const bindSidebar = () => {{
+            const side = sidebar();
+            if (!side || side.dataset.dgRevealBound === "true") return;
+            side.dataset.dgRevealBound = "true";
+            side.addEventListener("mouseenter", openSidebar);
+            side.addEventListener("mouseleave", scheduleHide);
+            side.addEventListener("pointerdown", markInteraction, true);
+            side.addEventListener("wheel", markInteraction, true);
+            side.addEventListener("scroll", markInteraction, true);
+          }};
+          bindSidebar();
+          window.setTimeout(bindSidebar, 300);
+          window.setTimeout(bindSidebar, 900);
+        }})();
+        </script>
+        """,
+        height=0,
     )
 
 
@@ -561,6 +757,13 @@ def _render_header(mode: str) -> None:
 
 def _render_sidebar() -> str:
     with st.sidebar:
+        pin_label = "핀 고정됨" if st.session_state.get("mvp_sidebar_pinned", True) else "핀 해제됨"
+        if st.button(pin_label, help="사이드바를 항상 열어둘지 전환합니다.", use_container_width=True):
+            st.session_state["mvp_sidebar_pinned"] = not st.session_state.get("mvp_sidebar_pinned", True)
+            st.query_params["view"] = "mvp"
+            st.query_params["sidebar"] = "pinned" if st.session_state["mvp_sidebar_pinned"] else "auto"
+            st.rerun()
+
         st.markdown("## DocuGuard AI")
         st.caption("문서와 웹페이지 증거를 검토하는 해커톤 MVP")
         mode = st.radio("분석 모드 선택", [DOCUMENT_MODE, WEB_MODE], horizontal=False)
@@ -775,9 +978,75 @@ def _apply_style() -> None:
             z-index: 1;
         }
         [data-testid="stAppViewContainer"] > .main .block-container {
-            padding-top: 3.1rem;
+            padding-top: 6.2rem;
             padding-bottom: 4rem;
             max-width: 1200px;
+        }
+        .mvp-navbar {
+            position: fixed;
+            top: 18px;
+            left: calc(21rem + 24px);
+            z-index: 999996;
+            display: inline-flex;
+            align-items: center;
+            gap: 22px;
+            min-height: 60px;
+            padding: 0 30px;
+            border: 1px solid rgba(148, 163, 184, 0.24);
+            border-radius: 20px;
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(244, 249, 255, 0.68));
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(18px);
+            animation: dgNavIn 250ms ease-out both;
+            transition: left 300ms ease-in-out, right 300ms ease-in-out;
+        }
+        body.dg-sidebar-hidden .mvp-navbar {
+            left: 24px;
+        }
+        body.dg-sidebar-open .mvp-navbar,
+        body.dg-sidebar-pinned .mvp-navbar {
+            left: calc(21rem + 24px);
+        }
+        .mvp-navbar a {
+            position: relative;
+            color: #0f172a !important;
+            font-size: 19px;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-decoration: none !important;
+            transition: color 200ms ease, opacity 200ms ease;
+        }
+        .mvp-navbar a::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: -7px;
+            height: 2px;
+            border-radius: 999px;
+            background: #2563eb;
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 200ms ease;
+        }
+        .mvp-navbar a:hover {
+            color: #2563eb !important;
+        }
+        .mvp-navbar a:hover::after {
+            transform: scaleX(1);
+        }
+        .mvp-navbar-divider {
+            width: 1px;
+            height: 22px;
+            background: rgba(148, 163, 184, 0.42);
+        }
+        .mvp-navbar strong {
+            color: #1e293b;
+            font-size: 21px;
+            font-weight: 700;
+            letter-spacing: 0;
+            white-space: nowrap;
         }
         [data-testid="stSidebar"] {
             background:
@@ -1148,7 +1417,8 @@ def _apply_style() -> None:
             grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
             align-items: center;
             min-height: 620px;
-            gap: 54px;
+            column-gap: 54px;
+            row-gap: 28px;
             padding: 58px 0 74px;
         }
         .landing-hero::before {
@@ -1364,10 +1634,11 @@ def _apply_style() -> None:
             line-height: 1.75;
         }
         .timeline-step h3 {
-            font-size: 36px;
-            line-height: 1.3;
-            font-weight: 800;
-            letter-spacing: 0.01em;
+            font-size: 26px;
+            line-height: 1.38;
+            font-weight: 700;
+            letter-spacing: -0.2px;
+            white-space: nowrap;
         }
         .timeline {
             position: relative;
@@ -1428,7 +1699,30 @@ def _apply_style() -> None:
         }
         .compare-card {
             padding: 46px;
-            min-height: 350px;
+            min-height: 390px;
+        }
+        .compare-card.before {
+            background:
+                linear-gradient(145deg, rgba(248, 250, 252, 0.90), rgba(226, 232, 240, 0.70)),
+                repeating-linear-gradient(0deg, rgba(15, 23, 42, 0.026) 0 1px, transparent 1px 8px),
+                repeating-linear-gradient(90deg, rgba(100, 116, 139, 0.022) 0 1px, transparent 1px 10px);
+            box-shadow: 0 22px 64px rgba(15, 23, 42, 0.07);
+        }
+        .compare-card.before::before {
+            opacity: 1;
+            background:
+                radial-gradient(circle at 18% 12%, rgba(148, 163, 184, 0.14), transparent 28%),
+                linear-gradient(130deg, rgba(255, 255, 255, 0.42), transparent 52%);
+        }
+        .compare-card.before::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                radial-gradient(circle, rgba(71, 85, 105, 0.10) 0 1px, transparent 1.4px);
+            background-size: 22px 22px;
+            opacity: 0.22;
         }
         .compare-card span {
             display: block;
@@ -1466,10 +1760,34 @@ def _apply_style() -> None:
         }
         .compare-card.after {
             border-color: rgba(37, 99, 235, 0.32);
+            background:
+                radial-gradient(circle at 78% 18%, rgba(56, 189, 248, 0.24), transparent 30%),
+                radial-gradient(circle at 18% 84%, rgba(37, 99, 235, 0.16), transparent 34%),
+                linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(226, 241, 255, 0.62));
             box-shadow: 0 30px 88px rgba(37, 99, 235, 0.13);
         }
         .compare-card.after span {
             color: #2563eb;
+        }
+        .compare-card.after::before {
+            opacity: 1;
+            background:
+                linear-gradient(rgba(37, 99, 235, 0.07) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(37, 99, 235, 0.06) 1px, transparent 1px),
+                linear-gradient(115deg, transparent 0 48%, rgba(56, 189, 248, 0.18) 48.1% 48.35%, transparent 48.5%);
+            background-size: 34px 34px, 34px 34px, 180px 180px;
+        }
+        .compare-card.after::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background:
+                radial-gradient(circle at 18% 22%, rgba(56, 189, 248, 0.30) 0 2px, transparent 3px),
+                radial-gradient(circle at 72% 34%, rgba(37, 99, 235, 0.24) 0 2px, transparent 3px),
+                radial-gradient(circle at 88% 78%, rgba(6, 182, 212, 0.22) 0 2px, transparent 3px);
+            background-size: 120px 120px, 150px 150px, 180px 180px;
+            opacity: 0.54;
         }
         .landing-cta {
             position: relative;
@@ -1511,6 +1829,7 @@ def _apply_style() -> None:
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            gap: 16px;
             min-width: 360px;
             min-height: 78px;
             margin-top: 42px;
@@ -1525,10 +1844,32 @@ def _apply_style() -> None:
             box-shadow: 0 18px 46px rgba(37, 99, 235, 0.34), 0 0 32px rgba(56, 189, 248, 0.22);
             transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
         }
+        .landing-cta-button svg {
+            width: 28px;
+            height: 28px;
+            color: #ffffff;
+            flex: 0 0 auto;
+            transition: transform 240ms ease-out;
+        }
+        .landing-cta-button svg path {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
         .landing-cta-button:hover {
             transform: translateY(-2px) scale(1.03);
             filter: brightness(1.06);
             box-shadow: 0 30px 72px rgba(37, 99, 235, 0.46), 0 0 56px rgba(56, 189, 248, 0.42);
+        }
+        .landing-cta-button:hover svg {
+            transform: translateX(5px);
+        }
+        .hero-cta-button {
+            grid-column: 2;
+            justify-self: center;
+            margin-top: 0;
         }
         .reveal {
             animation: dgReveal 760ms ease both;
@@ -1572,11 +1913,29 @@ def _apply_style() -> None:
             from { opacity: 0; transform: translateY(14px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        @keyframes dgNavIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
         @media (max-width: 800px) {
             [data-testid="stAppViewContainer"] > .main .block-container {
-                padding-top: 1.2rem;
+                padding-top: 5.6rem;
                 padding-left: 1rem;
                 padding-right: 1rem;
+            }
+            .mvp-navbar {
+                top: 12px;
+                left: 12px;
+                right: 12px;
+                min-height: 56px;
+                padding: 0 20px;
+                gap: 16px;
+            }
+            .mvp-navbar a {
+                font-size: 18px;
+            }
+            .mvp-navbar strong {
+                font-size: 20px;
             }
             .hero {
                 display: grid;
@@ -1607,7 +1966,8 @@ def _apply_style() -> None:
             }
             .landing-hero {
                 min-height: auto;
-                gap: 28px;
+                column-gap: 0;
+                row-gap: 28px;
                 padding: 36px 0 46px;
             }
             .hero-copy h1 {
@@ -1642,10 +2002,11 @@ def _apply_style() -> None:
                 font-weight: 600;
             }
             .timeline-step h3 {
-                font-size: 24px;
-                line-height: 1.35;
-                font-weight: 800;
-                letter-spacing: 0.01em;
+                font-size: 21px;
+                line-height: 1.42;
+                font-weight: 700;
+                letter-spacing: -0.2px;
+                white-space: normal;
             }
             .timeline-step {
                 min-height: 178px;
@@ -1690,6 +2051,14 @@ def _apply_style() -> None:
                 font-size: 22px;
                 padding: 0 24px;
             }
+            .landing-cta-button svg {
+                width: 22px;
+                height: 22px;
+            }
+            .hero-cta-button {
+                grid-column: 1;
+                justify-self: stretch;
+            }
         }
         @media (min-width: 801px) and (max-width: 1100px) {
             .landing-hero {
@@ -1728,9 +2097,11 @@ def _apply_style() -> None:
                 font-weight: 600;
             }
             .timeline-step h3 {
-                font-size: 30px;
-                line-height: 1.32;
-                font-weight: 800;
+                font-size: 23px;
+                line-height: 1.4;
+                font-weight: 700;
+                letter-spacing: -0.2px;
+                white-space: nowrap;
             }
             .compare-card span,
             .compare-card h3 {
