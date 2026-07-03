@@ -9,17 +9,24 @@ import numpy as np
 from PIL import Image, ImageChops, ImageEnhance
 
 Box = tuple[int, int, int, int]
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_PDF_PAGES = 20
+MAX_IMAGE_PIXELS = 18_000_000
+MAX_RENDERED_PAGE_PIXELS = 18_000_000
+
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 
 def load_document_pages(uploaded_file: Any) -> list[Image.Image]:
     """Load an uploaded image or every page of a PDF as RGB images."""
     filename = uploaded_file.name.lower()
     data = uploaded_file.getvalue()
+    _validate_upload(filename, data)
 
     if filename.endswith(".pdf"):
         return _load_pdf_pages(data)
 
-    return [Image.open(BytesIO(data)).convert("RGB")]
+    return [_load_image(data)]
 
 
 def load_document_preview(uploaded_file: Any) -> Image.Image:
@@ -104,14 +111,50 @@ def _load_pdf_pages(data: bytes) -> list[Image.Image]:
     document = fitz.open(stream=data, filetype="pdf")
     if document.page_count == 0:
         raise ValueError("PDF has no pages.")
+    if document.page_count > MAX_PDF_PAGES:
+        raise ValueError(f"PDF page limit exceeded. Upload up to {MAX_PDF_PAGES} pages.")
 
     pages: list[Image.Image] = []
-    for page_index in range(document.page_count):
-        page = document.load_page(page_index)
-        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-        pages.append(Image.open(BytesIO(pixmap.tobytes("png"))).convert("RGB"))
+    try:
+        for page_index in range(document.page_count):
+            page = document.load_page(page_index)
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            if pixmap.width * pixmap.height > MAX_RENDERED_PAGE_PIXELS:
+                raise ValueError("Rendered PDF page is too large for secure analysis.")
+            pages.append(_load_image(pixmap.tobytes("png")))
+    finally:
+        document.close()
 
     return pages
+
+
+def _validate_upload(filename: str, data: bytes) -> None:
+    if not data:
+        raise ValueError("Uploaded file is empty.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        max_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+        raise ValueError(f"File is too large. Upload files up to {max_mb} MB.")
+
+    allowed_extensions = (".jpg", ".jpeg", ".png", ".pdf")
+    if not filename.endswith(allowed_extensions):
+        raise ValueError("Unsupported file type. Upload JPG, PNG, or PDF files only.")
+    if filename.endswith(".pdf") and not data.startswith(b"%PDF-"):
+        raise ValueError("Invalid PDF file signature.")
+    if filename.endswith((".jpg", ".jpeg")) and not data.startswith(b"\xff\xd8\xff"):
+        raise ValueError("Invalid JPEG file signature.")
+    if filename.endswith(".png") and not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("Invalid PNG file signature.")
+
+
+def _load_image(data: bytes) -> Image.Image:
+    with Image.open(BytesIO(data)) as image:
+        image.verify()
+
+    with Image.open(BytesIO(data)) as image:
+        width, height = image.size
+        if width * height > MAX_IMAGE_PIXELS:
+            raise ValueError("Image resolution is too large for secure analysis.")
+        return image.convert("RGB")
 
 
 def _resize_image(image: Image.Image, max_side: int = 1400) -> Image.Image:

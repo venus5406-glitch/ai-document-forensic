@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -43,6 +45,11 @@ SHORTENER_DOMAINS = {
     "rebrand.ly",
     "shorturl.at",
 }
+MAX_URL_LENGTH = 2048
+MAX_REDIRECTS = 5
+REQUEST_TIMEOUT = 8
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+ALLOWED_PORTS = {80, 443}
 
 
 @dataclass
@@ -57,6 +64,10 @@ class UrlFetchResult:
 
 def analyze_url(url: str) -> dict:
     normalized_url = _normalize_url(url)
+    validation_error = _validate_public_url(normalized_url)
+    if validation_error:
+        return _blocked_url_result(normalized_url, validation_error)
+
     redirect = check_redirect(normalized_url)
     domain_warnings = check_domain_suspicion(normalized_url)
 
@@ -86,6 +97,11 @@ def check_domain_suspicion(url: str) -> list:
     parsed = urlparse(_normalize_url(url))
     host = parsed.netloc.lower().split("@")[-1].split(":")[0]
     warnings: list[str] = []
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+        warnings.append("포트 형식이 유효하지 않습니다.")
 
     if parsed.scheme != "https":
         warnings.append("HTTPS가 아닌 주소입니다.")
@@ -103,6 +119,8 @@ def check_domain_suspicion(url: str) -> list:
         warnings.append("서브도메인이 많은 주소입니다.")
     if len(host) > 45:
         warnings.append("도메인 길이가 비정상적으로 깁니다.")
+    if port and port not in {80, 443}:
+        warnings.append("일반 웹 포트가 아닌 포트를 사용합니다.")
 
     return warnings
 
@@ -110,13 +128,7 @@ def check_domain_suspicion(url: str) -> list:
 def check_redirect(url: str) -> dict:
     normalized_url = _normalize_url(url)
     try:
-        response = requests.get(
-            normalized_url,
-            timeout=8,
-            allow_redirects=True,
-            headers={"User-Agent": "DocuGuardAI/1.0"},
-        )
-        history = [item.url for item in response.history]
+        response, history = _safe_get(normalized_url)
         final_url = response.url
         redirected = _strip_fragment(normalized_url) != _strip_fragment(final_url)
         return {
@@ -169,12 +181,7 @@ def calculate_web_trust_score(results: dict) -> int:
 
 def _fetch_page(url: str) -> UrlFetchResult:
     try:
-        response = requests.get(
-            url,
-            timeout=10,
-            allow_redirects=True,
-            headers={"User-Agent": "DocuGuardAI/1.0"},
-        )
+        response, _ = _safe_get(url)
         content_type = response.headers.get("content-type", "")
         if "text/html" not in content_type and not response.text.strip().startswith("<"):
             return UrlFetchResult(
@@ -217,6 +224,141 @@ def _normalize_url(url: str) -> str:
     if not re.match(r"^https?://", url, flags=re.IGNORECASE):
         return f"https://{url}"
     return url
+
+
+def _safe_get(url: str) -> tuple[requests.Response, list[str]]:
+    current_url = url
+    history: list[str] = []
+
+    for _ in range(MAX_REDIRECTS + 1):
+        validation_error = _validate_public_url(current_url)
+        if validation_error:
+            raise requests.RequestException(validation_error)
+
+        response = _request_limited(current_url)
+        if response.is_redirect or response.is_permanent_redirect:
+            location = response.headers.get("location")
+            if not location:
+                return response, history
+            history.append(response.url)
+            current_url = urljoin(response.url, location)
+            continue
+        return response, history
+
+    raise requests.RequestException("리다이렉트 횟수가 너무 많습니다.")
+
+
+def _request_limited(url: str) -> requests.Response:
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        response = session.get(
+            url,
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
+            headers={"User-Agent": "DocuGuardAI/1.0"},
+            stream=True,
+        )
+        chunks: list[bytes] = []
+        total_bytes = 0
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            total_bytes += len(chunk)
+            if total_bytes > MAX_RESPONSE_BYTES:
+                response.close()
+                raise requests.RequestException("응답 본문이 너무 큽니다.")
+            chunks.append(chunk)
+        response._content = b"".join(chunks)
+        return response
+    finally:
+        session.close()
+
+
+def _validate_public_url(url: str) -> str:
+    if not url:
+        return "URL을 입력하세요."
+    if len(url) > MAX_URL_LENGTH:
+        return "URL이 너무 깁니다."
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return "HTTP 또는 HTTPS URL만 분석할 수 있습니다."
+    if not parsed.hostname:
+        return "유효한 도메인을 찾지 못했습니다."
+    if parsed.username or parsed.password:
+        return "사용자 정보가 포함된 URL은 분석할 수 없습니다."
+    try:
+        port = parsed.port
+    except ValueError:
+        return "URL 포트 형식이 유효하지 않습니다."
+    if port is not None and port not in ALLOWED_PORTS:
+        return "표준 HTTP/HTTPS 포트만 분석할 수 있습니다."
+
+    host = parsed.hostname.lower().rstrip(".")
+    if host in {"localhost", "0.0.0.0"} or host.endswith(".local"):
+        return "내부 또는 로컬 주소는 보안상 분석할 수 없습니다."
+
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return _validate_resolved_host(host)
+
+    if _is_private_address(ip):
+        return "내부망, 로컬, 예약 IP 주소는 보안상 분석할 수 없습니다."
+    return ""
+
+
+def _validate_resolved_host(host: str) -> str:
+    try:
+        addresses = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return ""
+
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if _is_private_address(ip):
+            return "내부망으로 해석되는 URL은 보안상 분석할 수 없습니다."
+    return ""
+
+
+def _is_private_address(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def _blocked_url_result(url: str, message: str) -> dict:
+    parsed = urlparse(url)
+    results = {
+        "input_url": url,
+        "reachable": False,
+        "status_code": None,
+        "final_url": url,
+        "title": "",
+        "domain": parsed.netloc,
+        "scheme": parsed.scheme,
+        "redirect": {
+            "ok": False,
+            "redirected": False,
+            "history": [],
+            "final_url": url,
+            "status_code": None,
+            "warning": message,
+        },
+        "domain_warnings": [message],
+        "keyword_hits": [],
+        "error": message,
+    }
+    results["trust_score"] = calculate_web_trust_score(results)
+    results["risk_level"] = _risk_level(results["trust_score"])
+    results["reasons"] = _build_reasons(results)
+    return results
 
 
 def _strip_fragment(url: str) -> str:

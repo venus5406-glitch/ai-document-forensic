@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import html
-from io import BytesIO
 
-from PIL import Image
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -476,7 +474,7 @@ def _web_mode() -> None:
         )
         if uploaded is not None:
             try:
-                image = Image.open(BytesIO(uploaded.getvalue())).convert("RGB")
+                image = load_document_pages(uploaded)[0]
                 st.session_state["web_capture_image"] = image
                 st.image(image, caption=uploaded.name, use_container_width=True)
             except Exception as exc:
@@ -808,28 +806,36 @@ def _render_empty_state(title: str, body: str) -> None:
 
 
 def _render_document_results(results: list[dict]) -> None:
-    max_score = max(int(result["score"]) for result in results)
+    max_suspicion_score = max(int(result["score"]) for result in results)
+    trust_score = max(0, min(100, 100 - max_suspicion_score))
     high_page = max(results, key=lambda result: int(result["score"]))
-    level_class = "low" if max_score < 40 else "warn" if max_score < 70 else "high"
+    level_class = "low" if trust_score >= 75 else "warn" if trust_score >= 45 else "high"
+    trust_label = "믿을 수 있음" if trust_score >= 75 else "검토 필요" if trust_score >= 45 else "주의 필요"
 
     st.markdown(
         f"""
         <div class="result-panel">
-          <span class="panel-label">최고 추가 검토 점수</span>
-          <strong class="{level_class}">{max_score}/100</strong>
-          <p>최고 의심 페이지: <b>{high_page["page"]}페이지</b> · 위험도: <b>{_translate_level(high_page["level"])}</b></p>
+          <span class="panel-label">문서 신뢰 점수</span>
+          <strong class="{level_class}">{trust_score}/100</strong>
+          <p>점수가 높을수록 믿을 수 있는 문서에 가깝습니다. 현재 판정: <b>{trust_label}</b></p>
+          <div class="score-guidance">
+            <span>최고 의심 페이지 {high_page["page"]}페이지</span>
+            <span>의심 신호 {max_suspicion_score}/100</span>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.progress(max_score / 100)
+    st.progress(trust_score / 100)
 
-    page_labels = [f"{result['page']}페이지 · {result['score']}/100" for result in results]
+    page_labels = [f"{result['page']}페이지 · 신뢰 {100 - int(result['score'])}/100" for result in results]
     tabs = st.tabs(page_labels)
 
     for tab, result in zip(tabs, results):
         with tab:
+            page_trust_score = max(0, min(100, 100 - int(result["score"])))
             st.markdown(f"#### {result['page']}페이지 분석 결과")
+            st.caption(f"신뢰 점수 {page_trust_score}/100 · 의심 신호 {int(result['score'])}/100")
             st.image(result["result_image"], caption="빨간 박스: 추가 검토 후보", use_container_width=True)
             st.write(_translate_text(result["summary"]))
             for reason in result["reasons"]:
@@ -837,18 +843,24 @@ def _render_document_results(results: list[dict]) -> None:
 
 
 def _render_web_results(capture_result: dict | None, url_result: dict | None) -> None:
-    capture_score = int(capture_result["score"]) if capture_result else 100
+    capture_suspicion_score = int(capture_result["score"]) if capture_result else 0
+    capture_score = 100 - capture_suspicion_score if capture_result else 100
     url_score = int(url_result["trust_score"]) if url_result else 100
     trust_score = min(capture_score, url_score)
     risk_level = _web_risk_level(trust_score)
     level_class = "low" if trust_score >= 75 else "warn" if trust_score >= 45 else "high"
+    trust_label = "믿을 수 있음" if trust_score >= 75 else "검토 필요" if trust_score >= 45 else "주의 필요"
 
     st.markdown(
         f"""
         <div class="result-panel">
           <span class="panel-label">웹 증거 신뢰도 점수</span>
           <strong class="{level_class}">{trust_score}/100</strong>
-          <p>위험도: <b>{risk_level}</b></p>
+          <p>점수가 높을수록 믿을 수 있는 증거에 가깝습니다. 현재 판정: <b>{trust_label}</b> · 위험도: <b>{risk_level}</b></p>
+          <div class="score-guidance">
+            <span>캡처 신뢰도 {capture_score}/100</span>
+            <span>URL 신뢰도 {url_score}/100</span>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1230,6 +1242,21 @@ def _apply_style() -> None:
         .result-panel strong.low { color: #16a34a; }
         .result-panel strong.warn { color: #f59e0b; }
         .result-panel strong.high { color: #dc2626; }
+        .score-guidance {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .score-guidance span {
+            padding: 7px 10px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.62);
+            color: #334155;
+            font-size: 13px;
+            font-weight: 700;
+        }
         .vault-panel {
             position: relative;
             overflow: hidden;
