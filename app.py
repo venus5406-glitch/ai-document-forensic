@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+import json
+import html
 from io import BytesIO
 
 from PIL import Image
 import streamlit as st
+import streamlit.components.v1 as components
 
+from document_vault import (
+    MAX_VAULT_ITEMS,
+    VAULT_STORAGE_KEY,
+    add_document_to_vault,
+    create_document_vault_item,
+    filter_vault_items,
+    local_storage_payload,
+    remove_document_from_vault,
+    sort_vault_items,
+    utc_now_iso,
+)
 from forensics import analyze_document, load_document_pages
 from sample_generator import create_contract_sample
 from web_forensics import analyze_url
@@ -190,6 +204,8 @@ def _render_landing_page() -> None:
 
 
 def _document_mode() -> None:
+    _render_vault_toolbar()
+
     pages = _select_document()
     if not pages:
         _render_empty_state(
@@ -282,7 +298,7 @@ def _select_document() -> list:
     st.write("버튼을 누를 때마다 다른 샘플 문서를 생성하고, 즉시 진위 검토 결과까지 확인합니다.")
     if st.button("샘플용 문서 AI생성", type="primary", use_container_width=True):
         pages = [create_contract_sample(tampered=True)]
-        _set_document(pages, "샘플용 문서 AI생성")
+        _set_document(pages, "샘플용 문서 AI생성", document_type="SAMPLE")
         _run_document_analysis(pages)
 
     uploaded_file = st.file_uploader(
@@ -300,15 +316,17 @@ def _select_document() -> list:
 
         current_key = f"{uploaded_file.name}:{uploaded_file.size}"
         if st.session_state.get("document_key") != current_key:
-            _set_document(pages, uploaded_file.name, current_key)
+            _set_document(pages, uploaded_file.name, current_key, uploaded_file.type)
 
     return st.session_state.get("document_pages", [])
 
 
-def _set_document(pages: list, name: str, key: str | None = None) -> None:
+def _set_document(pages: list, name: str, key: str | None = None, document_type: str | None = None) -> None:
     st.session_state["document_pages"] = pages
     st.session_state["document_name"] = name
     st.session_state["document_key"] = key or name
+    st.session_state["document_type"] = document_type or name.rsplit(".", 1)[-1].upper()
+    st.session_state["document_uploaded_at"] = utc_now_iso()
     st.session_state.pop("analysis_results", None)
 
 
@@ -325,6 +343,179 @@ def _run_document_analysis(pages: list) -> None:
             progress.progress(index / total)
 
     st.session_state["analysis_results"] = results
+    _save_current_document_to_vault(pages, results)
+
+
+def _ensure_vault_state() -> None:
+    st.session_state.setdefault("document_vault", [])
+    st.session_state.setdefault("document_vault_open", False)
+
+
+def _save_current_document_to_vault(pages: list, results: list[dict]) -> None:
+    _ensure_vault_state()
+    item = create_document_vault_item(
+        name=st.session_state.get("document_name", "문서"),
+        document_key=st.session_state.get("document_key", "document"),
+        uploaded_at=st.session_state.get("document_uploaded_at", utc_now_iso()),
+        pages=pages,
+        results=results,
+    )
+    next_vault, status = add_document_to_vault(st.session_state["document_vault"], item)
+    st.session_state["document_vault"] = next_vault
+    _sync_vault_to_local_storage()
+
+    if status == "duplicate":
+        st.toast("이미 보관함에 저장된 문서입니다.")
+    else:
+        st.toast("문서가 보관함에 저장되었습니다.")
+
+
+def _render_vault_toolbar() -> None:
+    _ensure_vault_state()
+    _sync_vault_to_local_storage()
+
+    left, right = st.columns([0.72, 0.28], gap="large")
+    with left:
+        st.markdown("### 문서 진위 여부 판별")
+        st.caption("분석 완료 문서는 최대 10개까지 보관함에 자동 저장됩니다.")
+    with right:
+        if st.button(
+            f"보관함 {len(st.session_state['document_vault'])} / {MAX_VAULT_ITEMS}",
+            use_container_width=True,
+            key="document_vault_toggle",
+        ):
+            st.session_state["document_vault_open"] = not st.session_state["document_vault_open"]
+
+    if st.session_state["document_vault_open"]:
+        _render_document_vault_panel()
+
+
+def _render_document_vault_panel() -> None:
+    vault = st.session_state.get("document_vault", [])
+    st.markdown(
+        f"""
+        <section class="vault-panel">
+          <div class="vault-panel-title">
+            <span>Document Vault</span>
+            <strong>{len(vault)} / {MAX_VAULT_ITEMS} 저장됨</strong>
+          </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    search_col, sort_col = st.columns([0.62, 0.38], gap="medium")
+    with search_col:
+        query = st.text_input("보관함 검색", placeholder="문서 이름 검색", key="document_vault_search")
+    with sort_col:
+        sort_mode = st.selectbox(
+            "정렬",
+            ["최신순", "오래된순", "진위 여부별", "신뢰도순"],
+            key="document_vault_sort",
+        )
+
+    visible_items = sort_vault_items(filter_vault_items(vault, query), sort_mode)
+    if not visible_items:
+        st.markdown(
+            """
+            <div class="vault-empty">
+              <div class="vault-empty-icon">□</div>
+              <strong>아직 저장된 문서가 없습니다.</strong>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    for item in visible_items:
+        _render_vault_card(item)
+
+
+def _render_vault_card(item: dict) -> None:
+    document_id = item["id"]
+    safe_name = html.escape(str(item.get("name", "문서")))
+    analyzed_at = _format_timestamp(str(item.get("analyzed_at", "")))
+    verdict = html.escape(str(item.get("verdict", "-")))
+    confidence = int(item.get("confidence", 0))
+    thumbnail = html.escape(str(item.get("thumbnail", "")))
+
+    st.markdown(
+        f"""
+        <div class="vault-card">
+          <img src="{thumbnail}" alt="{safe_name} 미리보기" />
+          <div class="vault-card-body">
+            <div class="vault-card-top">
+              <strong>{safe_name}</strong>
+              <span>{html.escape(str(item.get("document_type", "")))}</span>
+            </div>
+            <p>{analyzed_at}</p>
+            <div class="vault-card-meta">
+              <b>{verdict}</b>
+              <span>신뢰도 {confidence}%</span>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    open_col, delete_col = st.columns([0.78, 0.22], gap="small")
+    with open_col:
+        if st.button("저장된 결과 열기", use_container_width=True, key=f"open_vault_{document_id}"):
+            _open_vault_item(item)
+            st.rerun()
+    with delete_col:
+        if st.button("휴지통", use_container_width=True, key=f"delete_vault_{document_id}"):
+            st.session_state["pending_vault_delete"] = document_id
+
+    if st.session_state.get("pending_vault_delete") == document_id:
+        st.warning("정말 삭제하시겠습니까?")
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("삭제", type="primary", use_container_width=True, key=f"confirm_delete_{document_id}"):
+                st.session_state["document_vault"] = remove_document_from_vault(
+                    st.session_state["document_vault"],
+                    document_id,
+                )
+                st.session_state.pop("pending_vault_delete", None)
+                _sync_vault_to_local_storage()
+                st.toast("보관함에서 삭제되었습니다.")
+                st.rerun()
+        with cancel_col:
+            if st.button("취소", use_container_width=True, key=f"cancel_delete_{document_id}"):
+                st.session_state.pop("pending_vault_delete", None)
+                st.rerun()
+
+
+def _open_vault_item(item: dict) -> None:
+    st.session_state["document_pages"] = item["pages"]
+    st.session_state["document_name"] = item["name"]
+    st.session_state["document_key"] = item["duplicate_key"]
+    st.session_state["document_uploaded_at"] = item["uploaded_at"]
+    st.session_state["analysis_results"] = item["results"]
+    st.session_state["document_vault_open"] = False
+    st.toast("저장된 분석 결과를 열었습니다.")
+
+
+def _sync_vault_to_local_storage() -> None:
+    payload = json.dumps(local_storage_payload(st.session_state.get("document_vault", [])), ensure_ascii=False)
+    safe_payload = payload.replace("</", "<\\/")
+    components.html(
+        f"""
+        <script>
+        try {{
+          window.parent.localStorage.setItem({json.dumps(VAULT_STORAGE_KEY)}, JSON.stringify({safe_payload}));
+        }} catch (error) {{}}
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _format_timestamp(value: str) -> str:
+    if not value:
+        return "-"
+    return value.replace("T", " ").replace("Z", "")
 
 
 def _render_header(mode: str) -> None:
@@ -751,6 +942,140 @@ def _apply_style() -> None:
         .result-panel strong.low { color: #16a34a; }
         .result-panel strong.warn { color: #f59e0b; }
         .result-panel strong.high { color: #dc2626; }
+        .vault-panel {
+            position: relative;
+            overflow: hidden;
+            padding: 22px 24px;
+            margin: 10px 0 18px;
+            border: 1px solid rgba(148, 163, 184, 0.24);
+            border-radius: 10px;
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.80), rgba(244, 249, 255, 0.66)),
+                radial-gradient(circle at 92% 14%, rgba(34, 211, 238, 0.16), transparent 26%);
+            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(18px);
+        }
+        .vault-panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+        .vault-panel-title span {
+            color: #0f172a;
+            font-size: 24px;
+            font-weight: 800;
+        }
+        .vault-panel-title strong {
+            color: #2563eb;
+            font-size: 15px;
+        }
+        .vault-card {
+            display: grid;
+            grid-template-columns: 132px minmax(0, 1fr);
+            gap: 18px;
+            align-items: center;
+            padding: 18px;
+            margin-top: 14px;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 10px;
+            background: linear-gradient(145deg, rgba(255,255,255,0.78), rgba(241,247,253,0.58));
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.07);
+            backdrop-filter: blur(16px);
+            transition: transform 160ms ease, box-shadow 160ms ease;
+        }
+        .vault-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 22px 54px rgba(37, 99, 235, 0.12);
+        }
+        .vault-card img {
+            width: 132px;
+            height: 92px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid rgba(148, 163, 184, 0.20);
+            background: #f8fafc;
+        }
+        .vault-card-body {
+            min-width: 0;
+        }
+        .vault-card-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .vault-card-top strong {
+            overflow: hidden;
+            color: #0f172a;
+            font-size: 18px;
+            font-weight: 800;
+            line-height: 1.35;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .vault-card-top span {
+            flex: 0 0 auto;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(37, 99, 235, 0.08);
+            color: #2563eb;
+            font-size: 12px;
+            font-weight: 800;
+        }
+        .vault-card-body p {
+            margin: 8px 0 12px;
+            color: #64748b;
+            font-size: 13px;
+        }
+        .vault-card-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .vault-card-meta b,
+        .vault-card-meta span {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 0 10px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 800;
+        }
+        .vault-card-meta b {
+            background: rgba(14, 165, 233, 0.12);
+            color: #0369a1;
+        }
+        .vault-card-meta span {
+            background: rgba(15, 23, 42, 0.06);
+            color: #334155;
+        }
+        .vault-empty {
+            display: grid;
+            place-items: center;
+            gap: 12px;
+            padding: 44px 20px;
+            margin: 18px 0 20px;
+            border: 1px dashed rgba(37, 99, 235, 0.26);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.62);
+            color: #334155;
+            text-align: center;
+            backdrop-filter: blur(14px);
+        }
+        .vault-empty-icon {
+            display: grid;
+            place-items: center;
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            border: 1px solid rgba(37, 99, 235, 0.22);
+            color: #2563eb;
+            font-size: 28px;
+            font-weight: 800;
+        }
         hr {
             border-color: rgba(148, 163, 184, 0.20);
         }
@@ -1244,6 +1569,16 @@ def _apply_style() -> None:
             }
             .stage-badge {
                 white-space: normal;
+            }
+            .vault-panel-title,
+            .vault-card,
+            .vault-card-top {
+                display: grid;
+                grid-template-columns: 1fr;
+            }
+            .vault-card img {
+                width: 100%;
+                height: 150px;
             }
             .landing-hero,
             .feature-grid,
